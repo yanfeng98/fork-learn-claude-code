@@ -1,28 +1,8 @@
 # Learn Claude Code
 
-> **Disclaimer**: This is an independent educational project by [shareAI Lab](https://github.com/shareAI-lab). It is not affiliated with, endorsed by, or sponsored by Anthropic. "Claude Code" is a trademark of Anthropic.
-
 **Learn how modern AI agents work by building one from scratch.**
 
-[中文文档](./README_zh.md)
-
----
-
-**A note to readers:**
-
-We created this repository out of admiration for Claude Code - **what we believe to be the most capable AI coding agent in the world**. Initially, we attempted to reverse-engineer its design through behavioral observation and speculation. The analysis we published was riddled with inaccuracies, unfounded guesses, and technical errors. We deeply apologize to the Claude Code team and anyone who was misled by that content.
-
-Over the past six months, through building and iterating on real agent systems, our understanding of **"what makes a true AI agent"** has been fundamentally reshaped. We'd like to share these insights with you. All previous speculative content has been removed and replaced with original educational material.
-
----
-
-> Works with **[Kode CLI](https://github.com/shareAI-lab/Kode)**, **Claude Code**, **Cursor**, and any agent supporting the [Agent Skills Spec](https://github.com/anthropics/agent-skills).
-
-<img height="400" alt="demo" src="https://github.com/user-attachments/assets/0e1e31f8-064f-4908-92ce-121e2eb8d453" />
-
 ## What is this?
-
-A progressive tutorial that demystifies AI coding agents like Kode, Claude Code, and Cursor Agent.
 
 **5 versions, ~1100 lines total, each adding one concept:**
 
@@ -37,7 +17,9 @@ A progressive tutorial that demystifies AI coding agents like Kode, Claude Code,
 ## Quick Start
 
 ```bash
-pip install anthropic python-dotenv
+pip install uv
+uv sync
+source .venv/bin/activate
 
 # Configure your API
 cp .env.example .env

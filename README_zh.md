@@ -1,28 +1,8 @@
 # Learn Claude Code
 
-> **声明**: 这是 [shareAI Lab](https://github.com/shareAI-lab) 的独立教育项目，与 Anthropic 无关，未获其认可或赞助。"Claude Code" 是 Anthropic 的商标。
-
-**从零开始构建你自己的 AI Agent。**
-
-[English](./README.md)
-
 ---
-
-**致读者：**
-
-这个仓库源于我们对 Claude Code 的敬佩 - **我们认为它是世界上最优秀的 AI 编程代理**。最初，我们试图通过行为观察和推测来逆向分析它的设计。然而，我们当时发布的分析内容充斥着不准确的信息、缺乏依据的猜测和技术错误。我们在此向 Claude Code 团队以及所有被这些内容误导的朋友深表歉意。
-
-过去半年，在不断构建和迭代 Agent 系统的过程中，我们对 **"什么才是真正的 AI Agent"** 有了全新的认知。希望能把这些心得分享给大家。之前的推测性内容已全部移除，现已替换为原创教学材料。
-
----
-
-> 兼容 **[Kode CLI](https://github.com/shareAI-lab/Kode)**、**Claude Code**、**Cursor**，以及任何支持 [Agent Skills Spec](https://github.com/anthropics/agent-skills) 的 Agent。
-
-<img height="400" alt="demo" src="https://github.com/user-attachments/assets/0e1e31f8-064f-4908-92ce-121e2eb8d453" />
 
 ## 这是什么？
-
-一个渐进式教程，揭开 Kode、Claude Code、Cursor Agent 等 AI Agent 的神秘面纱。
 
 **5 个版本，总共约 1100 行，每个版本只添加一个概念：**
 
