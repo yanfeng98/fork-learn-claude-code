@@ -1,83 +1,38 @@
 #!/usr/bin/env python3
-"""
-v1_basic_agent.py - Mini Claude Code: Model as Agent (~200 lines)
-
-Core Philosophy: "The Model IS the Agent"
-=========================================
-The secret of Claude Code, Cursor Agent, Codex CLI? There is no secret.
-
-Strip away the CLI polish, progress bars, permission systems. What remains
-is surprisingly simple: a LOOP that lets the model call tools until done.
-
-Traditional Assistant:
-    User -> Model -> Text Response
-
-Agent System:
-    User -> Model -> [Tool -> Result]* -> Response
-                          ^________|
-
-The asterisk (*) matters! The model calls tools REPEATEDLY until it decides
-the task is complete. This transforms a chatbot into an autonomous agent.
-
-KEY INSIGHT: The model is the decision-maker. Code just provides tools and
-runs the loop. The model decides:
-  - Which tools to call
-  - In what order
-  - When to stop
-
-The Four Essential Tools:
-------------------------
-Claude Code has ~20 tools. But these 4 cover 90% of use cases:
-
-    | Tool       | Purpose              | Example                    |
-    |------------|----------------------|----------------------------|
-    | bash       | Run any command      | npm install, git status    |
-    | read_file  | Read file contents   | View src/index.ts          |
-    | write_file | Create/overwrite     | Create README.md           |
-    | edit_file  | Surgical changes     | Replace a function         |
-
-With just these 4 tools, the model can:
-  - Explore codebases (bash: find, grep, ls)
-  - Understand code (read_file)
-  - Make changes (write_file, edit_file)
-  - Run anything (bash: python, npm, make)
-
-Usage:
-    python v1_basic_agent.py
-"""
-
 import os
+import json
+import datetime
 import subprocess
-import sys
 from pathlib import Path
-
+from openai import OpenAI
+from rich.align import Align
+from rich.box import ROUNDED
+from rich.console import Console
+from rich.panel import Panel
+from rich.text import Text
 from dotenv import load_dotenv
 
-# Load configuration from .env file
-load_dotenv()
+load_dotenv(override=True)
 
-try:
-    from anthropic import Anthropic
-except ImportError:
-    sys.exit("Please install: pip install anthropic python-dotenv")
+class Colors:
+    RESET   = "\033[0m"
+    BLACK   = "\033[30m"
+    RED     = "\033[31m"
+    GREEN   = "\033[32m"
+    YELLOW  = "\033[33m"
+    BLUE    = "\033[34m"
+    MAGENTA = "\033[35m"
+    CYAN    = "\033[36m"
+    WHITE   = "\033[37m"
 
-
-# =============================================================================
-# Configuration
-# =============================================================================
-
-API_KEY = os.getenv("ANTHROPIC_API_KEY")
-BASE_URL = os.getenv("ANTHROPIC_BASE_URL")
-MODEL = os.getenv("MODEL_NAME", "claude-sonnet-4-20250514")
+MODEL = os.environ.get("OPENAI_MODEL", "deepseek-v3-2-251201")
 WORKDIR = Path.cwd()
 
-# Initialize client - handles both direct Anthropic and compatible APIs
-client = Anthropic(api_key=API_KEY, base_url=BASE_URL) if BASE_URL else Anthropic(api_key=API_KEY)
-
-
-# =============================================================================
-# System Prompt - The only "configuration" the model needs
-# =============================================================================
+client = OpenAI(
+    api_key=os.environ.get("OPENAI_API_KEY"),
+    base_url=os.environ.get("OPENAI_BASE_URL"),
+    timeout=1800,
+)
 
 SYSTEM = f"""You are a coding agent at {WORKDIR}.
 
@@ -89,109 +44,102 @@ Rules:
 - Make minimal changes. Don't over-engineer.
 - After finishing, summarize what changed."""
 
-
-# =============================================================================
-# Tool Definitions - 4 tools cover 90% of coding tasks
-# =============================================================================
-
 TOOLS = [
-    # Tool 1: Bash - The gateway to everything
-    # Can run any command: git, npm, python, curl, etc.
     {
-        "name": "bash",
-        "description": "Run a shell command. Use for: ls, find, grep, git, npm, python, etc.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "The shell command to execute"
-                }
+        "type": "function",
+        "function": {
+            "name": "bash",
+            "description": "Run a shell command. Use for: ls, find, grep, git, npm, python, etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The shell command to execute"
+                    }
+                },
+                "required": ["command"],
+                "additionalProperties": False,
             },
-            "required": ["command"],
+            "strict": True,
         },
     },
-
-    # Tool 2: Read File - For understanding existing code
-    # Returns file content with optional line limit for large files
     {
-        "name": "read_file",
-        "description": "Read file contents. Returns UTF-8 text.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Relative path to the file"
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "Read file contents. Returns UTF-8 text.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Relative path to the file"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max lines to read (default: all)"
+                    },
                 },
-                "limit": {
-                    "type": "integer",
-                    "description": "Max lines to read (default: all)"
-                },
+                "required": ["path", "limit"],
+                "additionalProperties": False,
             },
-            "required": ["path"],
+            "strict": True,
         },
     },
-
-    # Tool 3: Write File - For creating new files or complete rewrites
-    # Creates parent directories automatically
     {
-        "name": "write_file",
-        "description": "Write content to a file. Creates parent directories if needed.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Relative path for the file"
+        "type": "function",
+        "function": {
+            "name": "write_file",
+            "description": "Write content to a file. Creates parent directories if needed.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Relative path for the file"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Content to write"
+                    },
                 },
-                "content": {
-                    "type": "string",
-                    "description": "Content to write"
-                },
+                "required": ["path", "content"],
+                "additionalProperties": False,
             },
-            "required": ["path", "content"],
+            "strict": True,
         },
     },
-
-    # Tool 4: Edit File - For surgical changes to existing code
-    # Uses exact string matching for precise edits
     {
-        "name": "edit_file",
-        "description": "Replace exact text in a file. Use for surgical edits.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Relative path to the file"
+        "type": "function",
+        "function": {
+            "name": "edit_file",
+            "description": "Replace exact text in a file. Use for surgical edits.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Relative path to the file"
+                    },
+                    "old_text": {
+                        "type": "string",
+                        "description": "Exact text to find (must match precisely)"
+                    },
+                    "new_text": {
+                        "type": "string",
+                        "description": "Replacement text"
+                    },
                 },
-                "old_text": {
-                    "type": "string",
-                    "description": "Exact text to find (must match precisely)"
-                },
-                "new_text": {
-                    "type": "string",
-                    "description": "Replacement text"
-                },
+                "required": ["path", "old_text", "new_text"],
+                "additionalProperties": False,
             },
-            "required": ["path", "old_text", "new_text"],
+            "strict": True,
         },
     },
 ]
 
-
-# =============================================================================
-# Tool Implementations
-# =============================================================================
-
 def safe_path(p: str) -> Path:
-    """
-    Ensure path stays within workspace (security measure).
-
-    Prevents the model from accessing files outside the project directory.
-    Resolves relative paths and checks they don't escape via '../'.
-    """
     path = (WORKDIR / p).resolve()
     if not path.is_relative_to(WORKDIR):
         raise ValueError(f"Path escapes workspace: {p}")
@@ -199,14 +147,6 @@ def safe_path(p: str) -> Path:
 
 
 def run_bash(command: str) -> str:
-    """
-    Execute shell command with safety checks.
-
-    Security: Blocks obviously dangerous commands.
-    Timeout: 60 seconds to prevent hanging.
-    Output: Truncated to 50KB to prevent context overflow.
-    """
-    # Basic safety - block dangerous patterns
     dangerous = ["rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"]
     if any(d in command for d in dangerous):
         return "Error: Dangerous command blocked"
@@ -230,12 +170,6 @@ def run_bash(command: str) -> str:
 
 
 def run_read(path: str, limit: int = None) -> str:
-    """
-    Read file contents with optional line limit.
-
-    For large files, use limit to read just the first N lines.
-    Output truncated to 50KB to prevent context overflow.
-    """
     try:
         text = safe_path(path).read_text()
         lines = text.splitlines()
@@ -251,12 +185,6 @@ def run_read(path: str, limit: int = None) -> str:
 
 
 def run_write(path: str, content: str) -> str:
-    """
-    Write content to file, creating parent directories if needed.
-
-    This is for complete file creation/overwrite.
-    For partial edits, use edit_file instead.
-    """
     try:
         fp = safe_path(path)
         fp.parent.mkdir(parents=True, exist_ok=True)
@@ -268,12 +196,6 @@ def run_write(path: str, content: str) -> str:
 
 
 def run_edit(path: str, old_text: str, new_text: str) -> str:
-    """
-    Replace exact text in a file (surgical edit).
-
-    Uses exact string matching - the old_text must appear verbatim.
-    Only replaces the first occurrence to prevent accidental mass changes.
-    """
     try:
         fp = safe_path(path)
         content = fp.read_text()
@@ -281,7 +203,6 @@ def run_edit(path: str, old_text: str, new_text: str) -> str:
         if old_text not in content:
             return f"Error: Text not found in {path}"
 
-        # Replace only first occurrence for safety
         new_content = content.replace(old_text, new_text, 1)
         fp.write_text(new_content)
         return f"Edited {path}"
@@ -291,12 +212,6 @@ def run_edit(path: str, old_text: str, new_text: str) -> str:
 
 
 def execute_tool(name: str, args: dict) -> str:
-    """
-    Dispatch tool call to the appropriate implementation.
-
-    This is the bridge between the model's tool calls and actual execution.
-    Each tool returns a string result that goes back to the model.
-    """
     if name == "bash":
         return run_bash(args["command"])
     if name == "read_file":
@@ -307,115 +222,73 @@ def execute_tool(name: str, args: dict) -> str:
         return run_edit(args["path"], args["old_text"], args["new_text"])
     return f"Unknown tool: {name}"
 
-
-# =============================================================================
-# The Agent Loop - This is the CORE of everything
-# =============================================================================
-
 def agent_loop(messages: list) -> list:
-    """
-    The complete agent in one function.
-
-    This is the pattern that ALL coding agents share:
-
-        while True:
-            response = model(messages, tools)
-            if no tool calls: return
-            execute tools, append results, continue
-
-    The model controls the loop:
-      - Keeps calling tools until stop_reason != "tool_use"
-      - Results become context (fed back as "user" messages)
-      - Memory is automatic (messages list accumulates history)
-
-    Why this works:
-      1. Model decides which tools, in what order, when to stop
-      2. Tool results provide feedback for next decision
-      3. Conversation history maintains context across turns
-    """
     while True:
-        # Step 1: Call the model
-        response = client.messages.create(
+        completion = client.chat.completions.create(
             model=MODEL,
-            system=SYSTEM,
             messages=messages,
             tools=TOOLS,
-            max_tokens=8000,
+            max_tokens=32 * 1024,
         )
 
-        # Step 2: Collect any tool calls and print text output
-        tool_calls = []
-        for block in response.content:
-            if hasattr(block, "text"):
-                print(block.text)
-            if block.type == "tool_use":
-                tool_calls.append(block)
+        messages.append(completion.choices[0].message.model_dump())
 
-        # Step 3: If no tool calls, task is complete
-        if response.stop_reason != "tool_use":
-            messages.append({"role": "assistant", "content": response.content})
+        print(f"{Colors.GREEN}{completion.choices[0].message.content}{Colors.RESET}")
+
+        if completion.choices[0].finish_reason != "tool_calls":
             return messages
 
-        # Step 4: Execute each tool and collect results
-        results = []
-        for tc in tool_calls:
-            # Display what's being executed
-            print(f"\n> {tc.name}: {tc.input}")
+        tool_calls = completion.choices[0].message.tool_calls
+        for tool_call in tool_calls:
+            tool_name = tool_call.function.name
+            function_args = json.loads(tool_call.function.arguments)
+            print(f"{Colors.YELLOW}$ {tool_name}: {function_args}{Colors.RESET}")
 
-            # Execute and show result preview
-            output = execute_tool(tc.name, tc.input)
+            output = execute_tool(tool_name, function_args)
             preview = output[:200] + "..." if len(output) > 200 else output
-            print(f"  {preview}")
-
-            # Collect result for the model
-            results.append({
-                "type": "tool_result",
-                "tool_use_id": tc.id,
-                "content": output,
-            })
-
-        # Step 5: Append to conversation and continue
-        # Note: We append assistant's response, then user's tool results
-        # This maintains the alternating user/assistant pattern
-        messages.append({"role": "assistant", "content": response.content})
-        messages.append({"role": "user", "content": results})
-
-
-# =============================================================================
-# Main REPL
-# =============================================================================
+            print(f"{Colors.WHITE}{preview or '(empty)'}{Colors.RESET}")
+            messages.append(
+                {"role": "tool", "content": output[:50000], "tool_call_id": tool_call.id}
+            )
 
 def main():
-    """
-    Simple Read-Eval-Print Loop for interactive use.
+    console = Console()
 
-    The history list maintains conversation context across turns,
-    allowing multi-turn conversations with memory.
-    """
-    print(f"Mini Claude Code v1 - {WORKDIR}")
-    print("Type 'exit' to quit.\n")
+    message = Text.from_markup(f"Mini Claude Code v1 - [green]{WORKDIR}[/]\nCurrent Time: [green]{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}[/]")
+    content = Align(message, align="center")
 
-    history = []
+    panel = Panel(
+        content,
+        title="[bold yellow]Control Panel[/]",
+        subtitle="[dim]Type 'exit' to quit[/]",
+        border_style="blue",
+        box=ROUNDED,
+        padding=(1, 2),
+        expand=True,
+        highlight=True,
+    )
+
+    console.print(panel)
+
+    history = [{"role": "system", "content": SYSTEM}]
 
     while True:
         try:
-            user_input = input("You: ").strip()
+            user_input = input(f"{Colors.CYAN}>> {Colors.RESET}").strip()
         except (EOFError, KeyboardInterrupt):
             break
 
         if not user_input or user_input.lower() in ("exit", "quit", "q"):
             break
 
-        # Add user message to history
         history.append({"role": "user", "content": user_input})
 
         try:
-            # Run the agent loop
             agent_loop(history)
         except Exception as e:
             print(f"Error: {e}")
 
-        print()  # Blank line between turns
+        print()
 
 
 if __name__ == "__main__":

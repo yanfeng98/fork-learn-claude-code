@@ -8,25 +8,24 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
+class Colors:
+    RESET   = "\033[0m"
+    BLACK   = "\033[30m"
+    RED     = "\033[31m"
+    GREEN   = "\033[32m"
+    YELLOW  = "\033[33m"
+    BLUE    = "\033[34m"
+    MAGENTA = "\033[35m"
+    CYAN    = "\033[36m"
+    WHITE   = "\033[37m"
+
 client = OpenAI(
-    api_key=os.environ.get("OPENAI_API_KEY"), 
+    api_key=os.environ.get("OPENAI_API_KEY"),
     base_url=os.environ.get("OPENAI_BASE_URL"),
     timeout=1800,
 )
 
 MODEL = os.environ.get("OPENAI_MODEL", "deepseek-v3-2-251201")
-# TOOL = [{
-#     "name": "bash",
-#     "description": """Execute shell command. Common patterns:
-# - Read: cat/head/tail, grep/find/rg/ls, wc -l
-# - Write: echo 'content' > file, sed -i 's/old/new/g' file
-# - Subagent: python v0_bash_agent.py 'task description' (spawns isolated agent, returns summary)""",
-#     "input_schema": {
-#         "type": "object",
-#         "properties": {"command": {"type": "string"}},
-#         "required": ["command"]
-#     }
-# }]
 TOOL = [
     {
         "type": "function",
@@ -86,15 +85,15 @@ def chat(prompt, history=None):
         resp_msg = completion.choices[0].message
         if completion.choices[0].finish_reason != "tool_calls":
             return resp_msg.content
-        
-        print(f"\033[32m{resp_msg.content}\033[0m")
-        
+
+        print(f"{Colors.GREEN}{resp_msg.content}{Colors.RESET}")
+
         tool_calls = completion.choices[0].message.tool_calls
         for tool_call in tool_calls:
             tool_name = tool_call.function.name
             function_args = json.loads(tool_call.function.arguments)
             cmd = function_args.get("command")
-            print(f"\033[33m$ {cmd}\033[0m")
+            print(f"{Colors.YELLOW}$ {cmd}{Colors.RESET}")
             try:
                 out = subprocess.run(
                     cmd,
@@ -108,7 +107,7 @@ def chat(prompt, history=None):
             except subprocess.TimeoutExpired:
                 output = "(timeout after 300s)"
 
-            print(output or "(empty)")
+            print(f"{Colors.WHITE}$ {output or '(empty)'}{Colors.RESET}")
             history.append(
                 {"role": "tool", "content": output[:50000], "tool_call_id": tool_call.id}
             )
@@ -121,9 +120,9 @@ if __name__ == "__main__":
         history = []
         while True:
             try:
-                query = input("\033[36m>> \033[0m")
+                query = input(f"{Colors.CYAN}>> {Colors.RESET}")
             except (EOFError, KeyboardInterrupt):
                 break
             if query in ("q", "exit", ""):
                 break
-            print(chat(query, history))
+            print(f"{Colors.MAGENTA}$ {chat(query, history)}{Colors.RESET}")
