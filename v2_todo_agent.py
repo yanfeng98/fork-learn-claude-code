@@ -1,139 +1,53 @@
 #!/usr/bin/env python3
-"""
-v2_todo_agent.py - Mini Claude Code: Structured Planning (~300 lines)
-
-Core Philosophy: "Make Plans Visible"
-=====================================
-v1 works great for simple tasks. But ask it to "refactor auth, add tests,
-update docs" and watch what happens. Without explicit planning, the model:
-  - Jumps between tasks randomly
-  - Forgets completed steps
-  - Loses focus mid-way
-
-The Problem - "Context Fade":
-----------------------------
-In v1, plans exist only in the model's "head":
-
-    v1: "I'll do A, then B, then C"  (invisible)
-        After 10 tool calls: "Wait, what was I doing?"
-
-The Solution - TodoWrite Tool:
------------------------------
-v2 adds ONE new tool that fundamentally changes how the agent works:
-
-    v2:
-      [ ] Refactor auth module
-      [>] Add unit tests         <- Currently working on this
-      [ ] Update documentation
-
-Now both YOU and the MODEL can see the plan. The model can:
-  - Update status as it works
-  - See what's done and what's next
-  - Stay focused on one task at a time
-
-Key Constraints (not arbitrary - these are guardrails):
-------------------------------------------------------
-    | Rule              | Why                              |
-    |-------------------|----------------------------------|
-    | Max 20 items      | Prevents infinite task lists     |
-    | One in_progress   | Forces focus on one thing        |
-    | Required fields   | Ensures structured output        |
-
-The Deep Insight:
-----------------
-> "Structure constrains AND enables."
-
-Todo constraints (max items, one in_progress) ENABLE (visible plan, tracked progress).
-
-This pattern appears everywhere in agent design:
-  - max_tokens constrains -> enables manageable responses
-  - Tool schemas constrain -> enable structured calls
-  - Todos constrain -> enable complex task completion
-
-Good constraints aren't limitations. They're scaffolding.
-
-Usage:
-    python v2_todo_agent.py
-"""
-
 import os
+import json
+import datetime
 import subprocess
-import sys
 from pathlib import Path
-
+from openai import OpenAI
+from rich.align import Align
+from rich.box import ROUNDED
+from rich.console import Console
+from rich.panel import Panel
+from rich.text import Text
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
-try:
-    from anthropic import Anthropic
-except ImportError:
-    sys.exit("Please install: pip install anthropic python-dotenv")
+class Colors:
+    RESET   = "\033[0m"
+    BLACK   = "\033[30m"
+    RED     = "\033[31m"
+    GREEN   = "\033[32m"
+    YELLOW  = "\033[33m"
+    BLUE    = "\033[34m"
+    MAGENTA = "\033[35m"
+    CYAN    = "\033[36m"
+    WHITE   = "\033[37m"
 
-
-# =============================================================================
-# Configuration
-# =============================================================================
-
-API_KEY = os.getenv("ANTHROPIC_API_KEY")
-BASE_URL = os.getenv("ANTHROPIC_BASE_URL")
-MODEL = os.getenv("MODEL_NAME", "claude-sonnet-4-20250514")
+MODEL = os.environ.get("OPENAI_MODEL", "deepseek-v3-2-251201")
 WORKDIR = Path.cwd()
 
-client = Anthropic(api_key=API_KEY, base_url=BASE_URL) if BASE_URL else Anthropic(api_key=API_KEY)
-
-
-# =============================================================================
-# TodoManager - The core addition in v2
-# =============================================================================
+client = OpenAI(
+    api_key=os.environ.get("OPENAI_API_KEY"),
+    base_url=os.environ.get("OPENAI_BASE_URL"),
+    timeout=1800,
+)
 
 class TodoManager:
-    """
-    Manages a structured task list with enforced constraints.
-
-    Key Design Decisions:
-    --------------------
-    1. Max 20 items: Prevents the model from creating endless lists
-    2. One in_progress: Forces focus - can only work on ONE thing at a time
-    3. Required fields: Each item needs content, status, and activeForm
-
-    The activeForm field deserves explanation:
-    - It's the PRESENT TENSE form of what's happening
-    - Shown when status is "in_progress"
-    - Example: content="Add tests", activeForm="Adding unit tests..."
-
-    This gives real-time visibility into what the agent is doing.
-    """
 
     def __init__(self):
         self.items = []
 
     def update(self, items: list) -> str:
-        """
-        Validate and update the todo list.
-
-        The model sends a complete new list each time. We validate it,
-        store it, and return a rendered view that the model will see.
-
-        Validation Rules:
-        - Each item must have: content, status, activeForm
-        - Status must be: pending | in_progress | completed
-        - Only ONE item can be in_progress at a time
-        - Maximum 20 items allowed
-
-        Returns:
-            Rendered text view of the todo list
-        """
         validated = []
         in_progress_count = 0
 
         for i, item in enumerate(items):
-            # Extract and validate fields
             content = str(item.get("content", "")).strip()
             status = str(item.get("status", "pending")).lower()
             active_form = str(item.get("activeForm", "")).strip()
 
-            # Validation checks
             if not content:
                 raise ValueError(f"Item {i}: content required")
             if status not in ("pending", "in_progress", "completed"):
@@ -150,7 +64,6 @@ class TodoManager:
                 "activeForm": active_form
             })
 
-        # Enforce constraints
         if len(validated) > 20:
             raise ValueError("Max 20 todos allowed")
         if in_progress_count > 1:
@@ -160,19 +73,6 @@ class TodoManager:
         return self.render()
 
     def render(self) -> str:
-        """
-        Render the todo list as human-readable text.
-
-        Format:
-            [x] Completed task
-            [>] In progress task <- Doing something...
-            [ ] Pending task
-
-            (2/3 completed)
-
-        This rendered text is what the model sees as the tool result.
-        It can then update the list based on its current state.
-        """
         if not self.items:
             return "No todos."
 
@@ -190,14 +90,7 @@ class TodoManager:
 
         return "\n".join(lines)
 
-
-# Global todo manager instance
 TODO = TodoManager()
-
-
-# =============================================================================
-# System Prompt - Updated for v2
-# =============================================================================
 
 SYSTEM = f"""You are a coding agent at {WORKDIR}.
 
@@ -209,115 +102,125 @@ Rules:
 - Prefer tools over prose. Act, don't just explain.
 - After finishing, summarize what changed."""
 
-
-# =============================================================================
-# System Reminders - Soft prompts to encourage todo usage
-# =============================================================================
-
-# Shown at the start of conversation
 INITIAL_REMINDER = "<reminder>Use TodoWrite for multi-step tasks.</reminder>"
-
-# Shown if model hasn't updated todos in a while
 NAG_REMINDER = "<reminder>10+ turns without todo update. Please update todos.</reminder>"
 
-
-# =============================================================================
-# Tool Definitions (v1 tools + TodoWrite)
-# =============================================================================
-
 TOOLS = [
-    # v1 tools (unchanged)
     {
-        "name": "bash",
-        "description": "Run a shell command.",
-        "input_schema": {
-            "type": "object",
-            "properties": {"command": {"type": "string"}},
-            "required": ["command"],
-        },
-    },
-    {
-        "name": "read_file",
-        "description": "Read file contents.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string"},
-                "limit": {"type": "integer"}
+        "type": "function",
+        "function": {
+            "name": "bash",
+            "description": "Run a shell command.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string"
+                    }
+                },
+                "required": ["command"],
             },
-            "required": ["path"],
         },
     },
     {
-        "name": "write_file",
-        "description": "Write content to file.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string"},
-                "content": {"type": "string"}
-            },
-            "required": ["path", "content"],
-        },
-    },
-    {
-        "name": "edit_file",
-        "description": "Replace exact text in file.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string"},
-                "old_text": {"type": "string"},
-                "new_text": {"type": "string"},
-            },
-            "required": ["path", "old_text", "new_text"],
-        },
-    },
-
-    # NEW in v2: TodoWrite
-    # This is the key addition that enables structured planning
-    {
-        "name": "TodoWrite",
-        "description": "Update the task list. Use to plan and track progress.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "description": "Complete list of tasks (replaces existing)",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "content": {
-                                "type": "string",
-                                "description": "Task description"
-                            },
-                            "status": {
-                                "type": "string",
-                                "enum": ["pending", "in_progress", "completed"],
-                                "description": "Task status"
-                            },
-                            "activeForm": {
-                                "type": "string",
-                                "description": "Present tense action, e.g. 'Reading files'"
-                            },
-                        },
-                        "required": ["content", "status", "activeForm"],
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "Read file contents.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string"
                     },
-                }
+                    "limit": {
+                        "type": "integer"
+                    }
+                },
+                "required": ["path"],
             },
-            "required": ["items"],
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_file",
+            "description": "Write content to file.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string"
+                    },
+                    "content": {
+                        "type": "string"
+                    }
+                },
+                "required": ["path", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_file",
+            "description": "Replace exact text in file.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string"
+                    },
+                    "old_text": {
+                        "type": "string"
+                    },
+                    "new_text": {
+                        "type": "string"
+                    }
+                },
+                "required": ["path", "old_text", "new_text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "TodoWrite",
+            "description": "Update the task list. Use to plan and track progress.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "description": "Complete list of tasks (replaces existing)",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "description": "Task description"
+                                },
+                                "status": {
+                                    "type": "string",
+                                    "enum": ["pending", "in_progress", "completed"],
+                                    "description": "Task status"
+                                },
+                                "activeForm": {
+                                    "type": "string",
+                                    "description": "Present tense action, e.g. 'Reading files'"
+                                }
+                            },
+                            "required": ["content", "status", "activeForm"],
+                        }
+                    }
+                },
+                "required": ["items"],
+            },
+        },
+    }
 ]
 
-
-# =============================================================================
-# Tool Implementations (v1 + TodoWrite)
-# =============================================================================
-
 def safe_path(p: str) -> Path:
-    """Ensure path stays within workspace."""
     path = (WORKDIR / p).resolve()
     if not path.is_relative_to(WORKDIR):
         raise ValueError(f"Path escapes workspace: {p}")
@@ -325,7 +228,6 @@ def safe_path(p: str) -> Path:
 
 
 def run_bash(cmd: str) -> str:
-    """Execute shell command with safety checks."""
     dangerous = ["rm -rf /", "sudo", "shutdown", "reboot"]
     if any(d in cmd for d in dangerous):
         return "Error: Dangerous command blocked"
@@ -343,7 +245,6 @@ def run_bash(cmd: str) -> str:
 
 
 def run_read(path: str, limit: int = None) -> str:
-    """Read file contents."""
     try:
         text = safe_path(path).read_text()
         lines = text.splitlines()
@@ -355,7 +256,6 @@ def run_read(path: str, limit: int = None) -> str:
 
 
 def run_write(path: str, content: str) -> str:
-    """Write content to file."""
     try:
         fp = safe_path(path)
         fp.parent.mkdir(parents=True, exist_ok=True)
@@ -366,7 +266,6 @@ def run_write(path: str, content: str) -> str:
 
 
 def run_edit(path: str, old_text: str, new_text: str) -> str:
-    """Replace exact text in file."""
     try:
         fp = safe_path(path)
         content = fp.read_text()
@@ -379,12 +278,6 @@ def run_edit(path: str, old_text: str, new_text: str) -> str:
 
 
 def run_todo(items: list) -> str:
-    """
-    Update the todo list.
-
-    The model sends a complete new list (not a diff).
-    We validate it and return the rendered view.
-    """
     try:
         return TODO.update(items)
     except Exception as e:
@@ -392,7 +285,6 @@ def run_todo(items: list) -> str:
 
 
 def execute_tool(name: str, args: dict) -> str:
-    """Dispatch tool call to implementation."""
     if name == "bash":
         return run_bash(args["command"])
     if name == "read_file":
@@ -405,116 +297,88 @@ def execute_tool(name: str, args: dict) -> str:
         return run_todo(args["items"])
     return f"Unknown tool: {name}"
 
-
-# =============================================================================
-# Agent Loop (with todo tracking)
-# =============================================================================
-
-# Track how many rounds since last todo update
 rounds_without_todo = 0
 
 
 def agent_loop(messages: list) -> list:
-    """
-    Agent loop with todo usage tracking.
-
-    Same core loop as v1, but now we track whether the model
-    is using todos. If it goes too long without updating,
-    we'll inject a reminder in the main() function.
-    """
     global rounds_without_todo
 
     while True:
-        response = client.messages.create(
+        completion = client.chat.completions.create(
             model=MODEL,
-            system=SYSTEM,
             messages=messages,
             tools=TOOLS,
-            max_tokens=8000,
+            max_tokens=32 * 1024,
         )
 
-        tool_calls = []
-        for block in response.content:
-            if hasattr(block, "text"):
-                print(block.text)
-            if block.type == "tool_use":
-                tool_calls.append(block)
+        messages.append(completion.choices[0].message.model_dump())
 
-        if response.stop_reason != "tool_use":
-            messages.append({"role": "assistant", "content": response.content})
+        print(f"{Colors.GREEN}{completion.choices[0].message.content}{Colors.RESET}")
+
+        if completion.choices[0].finish_reason != "tool_calls":
             return messages
-
-        results = []
+        
         used_todo = False
-
-        for tc in tool_calls:
-            print(f"\n> {tc.name}")
-            output = execute_tool(tc.name, tc.input)
-            preview = output[:300] + "..." if len(output) > 300 else output
-            print(f"  {preview}")
-
-            results.append({
-                "type": "tool_result",
-                "tool_use_id": tc.id,
-                "content": output,
-            })
-
-            # Track todo usage
-            if tc.name == "TodoWrite":
+        tool_calls = completion.choices[0].message.tool_calls
+        for tool_call in tool_calls:
+            tool_name = tool_call.function.name
+            function_args = json.loads(tool_call.function.arguments)
+            if tool_name == "TodoWrite":
                 used_todo = True
+            else:
+                print(f"{Colors.YELLOW}$ {tool_name}: {function_args}{Colors.RESET}")
 
-        # Update counter: reset if used todo, increment otherwise
+            output = execute_tool(tool_name, function_args)
+            preview = output[:300] + "..." if len(output) > 300 else output
+            print(f"{Colors.WHITE}{preview or '(empty)'}{Colors.RESET}")
+            messages.append(
+                {"role": "tool", "content": output[:50000], "tool_call_id": tool_call.id}
+            )
+
         if used_todo:
             rounds_without_todo = 0
         else:
             rounds_without_todo += 1
 
-        messages.append({"role": "assistant", "content": response.content})
-        messages.append({"role": "user", "content": results})
-
-
-# =============================================================================
-# Main REPL
-# =============================================================================
-
 def main():
-    """
-    REPL with reminder injection.
-
-    Key v2 addition: We inject "reminder" messages to encourage
-    todo usage without forcing it. This is a soft constraint.
-
-    Reminders are injected as part of the user message, not as
-    separate system prompts. The model sees them but doesn't
-    respond to them directly.
-    """
     global rounds_without_todo
 
-    print(f"Mini Claude Code v2 (with Todos) - {WORKDIR}")
-    print("Type 'exit' to quit.\n")
+    console = Console()
 
-    history = []
+    message = Text.from_markup(f"Mini Claude Code v2 (with Todos) - [green]{WORKDIR}[/]\nCurrent Time: [green]{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}[/]")
+    content = Align(message, align="center")
+
+    panel = Panel(
+        content,
+        title="[bold yellow]Control Panel[/]",
+        subtitle="[dim]Type 'exit' to quit[/]",
+        border_style="blue",
+        box=ROUNDED,
+        padding=(1, 2),
+        expand=True,
+        highlight=True,
+    )
+
+    console.print(panel)
+
+    history = [{"role": "system", "content": SYSTEM}]
     first_message = True
 
     while True:
         try:
-            user_input = input("You: ").strip()
+            user_input = input(f"{Colors.CYAN}>> {Colors.RESET}").strip()
         except (EOFError, KeyboardInterrupt):
             break
 
         if not user_input or user_input.lower() in ("exit", "quit", "q"):
             break
 
-        # Build user message content
-        # May include reminders as context hints
         content = []
 
         if first_message:
-            # Gentle reminder at start
             content.append({"type": "text", "text": INITIAL_REMINDER})
             first_message = False
         elif rounds_without_todo > 10:
-            # Nag if model hasn't used todos in a while
             content.append({"type": "text", "text": NAG_REMINDER})
 
         content.append({"type": "text", "text": user_input})
