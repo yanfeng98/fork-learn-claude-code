@@ -1,151 +1,66 @@
 #!/usr/bin/env python3
-"""
-v3_subagent.py - Mini Claude Code: Subagent Mechanism (~450 lines)
-
-Core Philosophy: "Divide and Conquer with Context Isolation"
-=============================================================
-v2 adds planning. But for large tasks like "explore the codebase then
-refactor auth", a single agent hits problems:
-
-The Problem - Context Pollution:
--------------------------------
-    Single-Agent History:
-      [exploring...] cat file1.py -> 500 lines
-      [exploring...] cat file2.py -> 300 lines
-      ... 15 more files ...
-      [now refactoring...] "Wait, what did file1 contain?"
-
-The model's context fills with exploration details, leaving little room
-for the actual task. This is "context pollution".
-
-The Solution - Subagents with Isolated Context:
-----------------------------------------------
-    Main Agent History:
-      [Task: explore codebase]
-        -> Subagent explores 20 files (in its own context)
-        -> Returns ONLY: "Auth in src/auth/, DB in src/models/"
-      [now refactoring with clean context]
-
-Each subagent has:
-  1. Its own fresh message history
-  2. Filtered tools (explore can't write)
-  3. Specialized system prompt
-  4. Returns only final summary to parent
-
-The Key Insight:
----------------
-    Process isolation = Context isolation
-
-By spawning subtasks, we get:
-  - Clean context for the main agent
-  - Parallel exploration possible
-  - Natural task decomposition
-  - Same agent loop, different contexts
-
-Agent Type Registry:
--------------------
-    | Type    | Tools               | Purpose                     |
-    |---------|---------------------|---------------------------- |
-    | explore | bash, read_file     | Read-only exploration       |
-    | code    | all tools           | Full implementation access  |
-    | plan    | bash, read_file     | Design without modifying    |
-
-Typical Flow:
--------------
-    User: "Refactor auth to use JWT"
-
-    Main Agent:
-      1. Task(explore): "Find all auth-related files"
-         -> Subagent reads 10 files
-         -> Returns: "Auth in src/auth/login.py..."
-
-      2. Task(plan): "Design JWT migration"
-         -> Subagent analyzes structure
-         -> Returns: "1. Add jwt lib 2. Create utils..."
-
-      3. Task(code): "Implement JWT tokens"
-         -> Subagent writes code
-         -> Returns: "Created jwt_utils.py, updated login.py"
-
-      4. Summarize changes to user
-
-Usage:
-    python v3_subagent.py
-"""
-
 import os
-import subprocess
 import sys
 import time
+import json
+import subprocess
 from pathlib import Path
-
+from openai import OpenAI
+from rich.align import Align
+from rich.box import ROUNDED
+from rich.console import Console
+from rich.panel import Panel
+from rich.text import Text
 from dotenv import load_dotenv
 
 load_dotenv()
 
-try:
-    from anthropic import Anthropic
-except ImportError:
-    sys.exit("Please install: pip install anthropic python-dotenv")
+class Colors:
+    RESET   = "\033[0m"
+    BLACK   = "\033[30m"
+    RED     = "\033[31m"
+    GREEN   = "\033[32m"
+    YELLOW  = "\033[33m"
+    BLUE    = "\033[34m"
+    MAGENTA = "\033[35m"
+    CYAN    = "\033[36m"
+    WHITE   = "\033[37m"
 
-
-# =============================================================================
-# Configuration
-# =============================================================================
-
-API_KEY = os.getenv("ANTHROPIC_API_KEY")
-BASE_URL = os.getenv("ANTHROPIC_BASE_URL")
-MODEL = os.getenv("MODEL_NAME", "claude-sonnet-4-20250514")
+MODEL = os.environ.get("OPENAI_MODEL", "deepseek-v3-2-251201")
 WORKDIR = Path.cwd()
 
-client = Anthropic(api_key=API_KEY, base_url=BASE_URL) if BASE_URL else Anthropic(api_key=API_KEY)
-
-
-# =============================================================================
-# Agent Type Registry - The core of subagent mechanism
-# =============================================================================
+client = OpenAI(
+    api_key=os.environ.get("OPENAI_API_KEY"),
+    base_url=os.environ.get("OPENAI_BASE_URL"),
+    timeout=1800,
+)
 
 AGENT_TYPES = {
-    # Explore: Read-only agent for searching and analyzing
-    # Cannot modify files - safe for broad exploration
     "explore": {
         "description": "Read-only agent for exploring code, finding files, searching",
-        "tools": ["bash", "read_file"],  # No write access
+        "tools": ["bash", "read_file"],
         "prompt": "You are an exploration agent. Search and analyze, but never modify files. Return a concise summary.",
     },
-
-    # Code: Full-powered agent for implementation
-    # Has all tools - use for actual coding work
     "code": {
         "description": "Full agent for implementing features and fixing bugs",
-        "tools": "*",  # All tools
+        "tools": "*",
         "prompt": "You are a coding agent. Implement the requested changes efficiently.",
     },
-
-    # Plan: Analysis agent for design work
-    # Read-only, focused on producing plans and strategies
     "plan": {
         "description": "Planning agent for designing implementation strategies",
-        "tools": ["bash", "read_file"],  # Read-only
+        "tools": ["bash", "read_file"],
         "prompt": "You are a planning agent. Analyze the codebase and output a numbered implementation plan. Do NOT make changes.",
     },
 }
 
 
 def get_agent_descriptions() -> str:
-    """Generate agent type descriptions for the Task tool."""
     return "\n".join(
         f"- {name}: {cfg['description']}"
         for name, cfg in AGENT_TYPES.items()
     )
 
-
-# =============================================================================
-# TodoManager (from v2, unchanged)
-# =============================================================================
-
 class TodoManager:
-    """Task list manager with constraints. See v2 for details."""
 
     def __init__(self):
         self.items = []
@@ -192,11 +107,6 @@ class TodoManager:
 
 TODO = TodoManager()
 
-
-# =============================================================================
-# System Prompt
-# =============================================================================
-
 SYSTEM = f"""You are a coding agent at {WORKDIR}.
 
 Loop: plan -> act with tools -> report.
@@ -210,25 +120,24 @@ Rules:
 - Prefer tools over prose. Act, don't just explain.
 - After finishing, summarize what changed."""
 
-
-# =============================================================================
-# Base Tool Definitions
-# =============================================================================
-
 BASE_TOOLS = [
     {
+        "type": "function",
         "name": "bash",
         "description": "Run shell command.",
-        "input_schema": {
+        "parameters": {
             "type": "object",
-            "properties": {"command": {"type": "string"}},
+            "properties": {
+                "command": {"type": "string"}
+            },
             "required": ["command"],
         },
     },
     {
+        "type": "function",
         "name": "read_file",
         "description": "Read file contents.",
-        "input_schema": {
+        "parameters": {
             "type": "object",
             "properties": {
                 "path": {"type": "string"},
@@ -238,9 +147,10 @@ BASE_TOOLS = [
         },
     },
     {
+        "type": "function",
         "name": "write_file",
         "description": "Write to file.",
-        "input_schema": {
+        "parameters": {
             "type": "object",
             "properties": {
                 "path": {"type": "string"},
@@ -250,9 +160,10 @@ BASE_TOOLS = [
         },
     },
     {
+        "type": "function",
         "name": "edit_file",
         "description": "Replace text in file.",
-        "input_schema": {
+        "parameters": {
             "type": "object",
             "properties": {
                 "path": {"type": "string"},
@@ -263,9 +174,10 @@ BASE_TOOLS = [
         },
     },
     {
+        "type": "function",
         "name": "TodoWrite",
         "description": "Update task list.",
-        "input_schema": {
+        "parameters": {
             "type": "object",
             "properties": {
                 "items": {
@@ -289,12 +201,8 @@ BASE_TOOLS = [
     },
 ]
 
-
-# =============================================================================
-# Task Tool - The core addition in v3
-# =============================================================================
-
 TASK_TOOL = {
+    "type": "function",
     "name": "Task",
     "description": f"""Spawn a subagent for a focused subtask.
 
@@ -309,7 +217,7 @@ Example uses:
 - Task(plan): "Design a migration strategy for the database"
 - Task(code): "Implement the user registration form"
 """,
-    "input_schema": {
+    "parameters": {
         "type": "object",
         "properties": {
             "description": {
@@ -330,31 +238,18 @@ Example uses:
     },
 }
 
-# Main agent gets all tools including Task
 ALL_TOOLS = BASE_TOOLS + [TASK_TOOL]
 
 
 def get_tools_for_agent(agent_type: str) -> list:
-    """
-    Filter tools based on agent type.
-
-    Each agent type has a whitelist of allowed tools.
-    '*' means all tools (but subagents don't get Task to prevent infinite recursion).
-    """
     allowed = AGENT_TYPES.get(agent_type, {}).get("tools", "*")
 
     if allowed == "*":
-        return BASE_TOOLS  # All base tools, but NOT Task (no recursion in demo)
+        return BASE_TOOLS
 
     return [t for t in BASE_TOOLS if t["name"] in allowed]
 
-
-# =============================================================================
-# Tool Implementations
-# =============================================================================
-
 def safe_path(p: str) -> Path:
-    """Ensure path stays within workspace."""
     path = (WORKDIR / p).resolve()
     if not path.is_relative_to(WORKDIR):
         raise ValueError(f"Path escapes workspace: {p}")
@@ -362,7 +257,6 @@ def safe_path(p: str) -> Path:
 
 
 def run_bash(cmd: str) -> str:
-    """Execute shell command with safety checks."""
     if any(d in cmd for d in ["rm -rf /", "sudo", "shutdown"]):
         return "Error: Dangerous command"
     try:
@@ -376,7 +270,6 @@ def run_bash(cmd: str) -> str:
 
 
 def run_read(path: str, limit: int = None) -> str:
-    """Read file contents."""
     try:
         lines = safe_path(path).read_text().splitlines()
         if limit:
@@ -387,7 +280,6 @@ def run_read(path: str, limit: int = None) -> str:
 
 
 def run_write(path: str, content: str) -> str:
-    """Write content to file."""
     try:
         fp = safe_path(path)
         fp.parent.mkdir(parents=True, exist_ok=True)
@@ -398,7 +290,6 @@ def run_write(path: str, content: str) -> str:
 
 
 def run_edit(path: str, old_text: str, new_text: str) -> str:
-    """Replace exact text in file."""
     try:
         fp = safe_path(path)
         text = fp.read_text()
@@ -411,114 +302,81 @@ def run_edit(path: str, old_text: str, new_text: str) -> str:
 
 
 def run_todo(items: list) -> str:
-    """Update the todo list."""
     try:
         return TODO.update(items)
     except Exception as e:
         return f"Error: {e}"
 
-
-# =============================================================================
-# Subagent Execution - The heart of v3
-# =============================================================================
-
 def run_task(description: str, prompt: str, agent_type: str) -> str:
-    """
-    Execute a subagent task with isolated context.
-
-    This is the core of the subagent mechanism:
-
-    1. Create isolated message history (KEY: no parent context!)
-    2. Use agent-specific system prompt
-    3. Filter available tools based on agent type
-    4. Run the same query loop as main agent
-    5. Return ONLY the final text (not intermediate details)
-
-    The parent agent sees just the summary, keeping its context clean.
-
-    Progress Display:
-    ----------------
-    While running, we show:
-      [explore] find auth files ... 5 tools, 3.2s
-
-    This gives visibility without polluting the main conversation.
-    """
     if agent_type not in AGENT_TYPES:
         return f"Error: Unknown agent type '{agent_type}'"
 
     config = AGENT_TYPES[agent_type]
-
-    # Agent-specific system prompt
     sub_system = f"""You are a {agent_type} subagent at {WORKDIR}.
 
 {config["prompt"]}
 
 Complete the task and return a clear, concise summary."""
 
-    # Filtered tools for this agent type
     sub_tools = get_tools_for_agent(agent_type)
 
-    # ISOLATED message history - this is the key!
-    # The subagent starts fresh, doesn't see parent's conversation
-    sub_messages = [{"role": "user", "content": prompt}]
+    sub_messages = [
+        {"role": "system", "content": sub_system},
+        {"role": "user", "content": prompt}
+    ]
 
-    # Progress tracking
     print(f"  [{agent_type}] {description}")
     start = time.time()
     tool_count = 0
 
-    # Run the same agent loop (silently - don't print to main chat)
     while True:
-        response = client.messages.create(
+
+        completion = client.chat.completions.create(
             model=MODEL,
-            system=sub_system,
             messages=sub_messages,
             tools=sub_tools,
-            max_tokens=8000,
+            max_tokens=32 * 1024,
         )
 
-        if response.stop_reason != "tool_use":
+        if completion.choices[0].finish_reason != "tool_calls":
             break
 
-        tool_calls = [b for b in response.content if b.type == "tool_use"]
-        results = []
+        sub_messages.append(completion.choices[0].message.model_dump())
 
-        for tc in tool_calls:
+        print(f"{Colors.GREEN}{completion.choices[0].message.content}{Colors.RESET}")
+
+        tool_calls = completion.choices[0].message.tool_calls
+        for tool_call in tool_calls:
             tool_count += 1
-            output = execute_tool(tc.name, tc.input)
-            results.append({
-                "type": "tool_result",
-                "tool_use_id": tc.id,
-                "content": output
-            })
+            tool_name = tool_call.function.name
+            function_args = json.loads(tool_call.function.arguments)
+            print(f"{Colors.YELLOW}$ {tool_name}: {function_args}{Colors.RESET}")
 
-            # Update progress line (in-place)
+            output = execute_tool(tool_name, function_args)
+            preview = output[:300] + "..." if len(output) > 300 else output
+            print(f"{Colors.WHITE}{preview or '(empty)'}{Colors.RESET}")
+            sub_messages.append(
+                {"role": "tool", "content": output[:50000], "tool_call_id": tool_call.id}
+            )
+
             elapsed = time.time() - start
             sys.stdout.write(
                 f"\r  [{agent_type}] {description} ... {tool_count} tools, {elapsed:.1f}s"
             )
             sys.stdout.flush()
 
-        sub_messages.append({"role": "assistant", "content": response.content})
-        sub_messages.append({"role": "user", "content": results})
-
-    # Final progress update
     elapsed = time.time() - start
     sys.stdout.write(
         f"\r  [{agent_type}] {description} - done ({tool_count} tools, {elapsed:.1f}s)\n"
     )
 
-    # Extract and return only the final text
-    # This is what the parent agent sees - a clean summary
-    for block in response.content:
-        if hasattr(block, "text"):
-            return block.text
+    if completion.choices[0].message.content:
+        return completion.choices[0].message.content
 
     return "(subagent returned no text)"
 
 
 def execute_tool(name: str, args: dict) -> str:
-    """Dispatch tool call to implementation."""
     if name == "bash":
         return run_bash(args["command"])
     if name == "read_file":
