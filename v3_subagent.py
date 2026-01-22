@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 import os
-import sys
 import time
 import json
+import datetime
 import subprocess
 from pathlib import Path
 from openai import OpenAI
@@ -123,88 +123,99 @@ Rules:
 BASE_TOOLS = [
     {
         "type": "function",
-        "name": "bash",
-        "description": "Run shell command.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "command": {"type": "string"}
+        "function": {
+            "name": "bash",
+            "description": "Run shell command.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string"}
+                },
+                "required": ["command"],
             },
-            "required": ["command"],
-        },
+        }
     },
     {
         "type": "function",
-        "name": "read_file",
-        "description": "Read file contents.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string"},
-                "limit": {"type": "integer"}
+        "function": {
+            "name": "read_file",
+            "description": "Read file contents.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "limit": {"type": "integer"}
+                },
+                "required": ["path"],
             },
-            "required": ["path"],
-        },
+        }
     },
     {
         "type": "function",
-        "name": "write_file",
-        "description": "Write to file.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string"},
-                "content": {"type": "string"}
+        "function": {
+            "name": "write_file",
+            "description": "Write to file.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "content": {"type": "string"}
+                },
+                "required": ["path", "content"],
             },
-            "required": ["path", "content"],
-        },
+        }
     },
     {
         "type": "function",
-        "name": "edit_file",
-        "description": "Replace text in file.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string"},
-                "old_text": {"type": "string"},
-                "new_text": {"type": "string"},
+        "function": {
+            "name": "edit_file",
+            "description": "Replace text in file.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "old_text": {"type": "string"},
+                    "new_text": {"type": "string"},
+                },
+                "required": ["path", "old_text", "new_text"],
             },
-            "required": ["path", "old_text", "new_text"],
-        },
+        }
     },
     {
         "type": "function",
-        "name": "TodoWrite",
-        "description": "Update task list.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
+        "function": {
+            "name": "TodoWrite",
+            "description": "Update task list.",
+            "parameters": {
+                "type": "object",
+                "properties": {
                     "items": {
-                        "type": "object",
-                        "properties": {
-                            "content": {"type": "string"},
-                            "status": {
-                                "type": "string",
-                                "enum": ["pending", "in_progress", "completed"]
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "content": {"type": "string"},
+                                "status": {
+                                    "type": "string",
+                                    "enum": ["pending", "in_progress", "completed"]
+                                },
+                                "activeForm": {"type": "string"},
                             },
-                            "activeForm": {"type": "string"},
+                            "required": ["content", "status", "activeForm"],
                         },
-                        "required": ["content", "status", "activeForm"],
-                    },
-                }
+                    }
+                },
+                "required": ["items"],
             },
-            "required": ["items"],
-        },
+        }
     },
 ]
 
 TASK_TOOL = {
     "type": "function",
-    "name": "Task",
-    "description": f"""Spawn a subagent for a focused subtask.
+    "function": {
+        "name": "Task",
+        "description": f"""Spawn a subagent for a focused subtask.
 
 Subagents run in ISOLATED context - they don't see parent's history.
 Use this to keep the main conversation clean.
@@ -217,25 +228,26 @@ Example uses:
 - Task(plan): "Design a migration strategy for the database"
 - Task(code): "Implement the user registration form"
 """,
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "description": {
-                "type": "string",
-                "description": "Short task name (3-5 words) for progress display"
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "description": "Short task name (3-5 words) for progress display"
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "Detailed instructions for the subagent"
+                },
+                "agent_type": {
+                    "type": "string",
+                    "enum": list(AGENT_TYPES.keys()),
+                    "description": "Type of agent to spawn"
+                },
             },
-            "prompt": {
-                "type": "string",
-                "description": "Detailed instructions for the subagent"
-            },
-            "agent_type": {
-                "type": "string",
-                "enum": list(AGENT_TYPES.keys()),
-                "description": "Type of agent to spawn"
-            },
+            "required": ["description", "prompt", "agent_type"],
         },
-        "required": ["description", "prompt", "agent_type"],
-    },
+    }
 }
 
 ALL_TOOLS = BASE_TOOLS + [TASK_TOOL]
@@ -247,7 +259,7 @@ def get_tools_for_agent(agent_type: str) -> list:
     if allowed == "*":
         return BASE_TOOLS
 
-    return [t for t in BASE_TOOLS if t["name"] in allowed]
+    return [t for t in BASE_TOOLS if t["function"]["name"] in allowed]
 
 def safe_path(p: str) -> Path:
     path = (WORKDIR / p).resolve()
@@ -325,7 +337,7 @@ Complete the task and return a clear, concise summary."""
         {"role": "user", "content": prompt}
     ]
 
-    print(f"  [{agent_type}] {description}")
+    print(f"{Colors.MAGENTA}[{agent_type}] {description}{Colors.RESET}")
     start = time.time()
     tool_count = 0
 
@@ -343,7 +355,7 @@ Complete the task and return a clear, concise summary."""
 
         sub_messages.append(completion.choices[0].message.model_dump())
 
-        print(f"{Colors.GREEN}{completion.choices[0].message.content}{Colors.RESET}")
+        print(f"{Colors.GREEN}{completion.choices[0].message.content.strip()}{Colors.RESET}")
 
         tool_calls = completion.choices[0].message.tool_calls
         for tool_call in tool_calls:
@@ -360,15 +372,10 @@ Complete the task and return a clear, concise summary."""
             )
 
             elapsed = time.time() - start
-            sys.stdout.write(
-                f"\r  [{agent_type}] {description} ... {tool_count} tools, {elapsed:.1f}s"
-            )
-            sys.stdout.flush()
+            print(f"{Colors.BLUE}[{agent_type}] {description} ... {tool_count} tools, {elapsed:.1f}s{Colors.RESET}")
 
     elapsed = time.time() - start
-    sys.stdout.write(
-        f"\r  [{agent_type}] {description} - done ({tool_count} tools, {elapsed:.1f}s)\n"
-    )
+    print(f"{Colors.BLUE}[{agent_type}] {description} - done ({tool_count} tools, {elapsed:.1f}s){Colors.RESET}")
 
     if completion.choices[0].message.content:
         return completion.choices[0].message.content
@@ -391,77 +398,62 @@ def execute_tool(name: str, args: dict) -> str:
         return run_task(args["description"], args["prompt"], args["agent_type"])
     return f"Unknown tool: {name}"
 
-
-# =============================================================================
-# Main Agent Loop
-# =============================================================================
-
 def agent_loop(messages: list) -> list:
-    """
-    Main agent loop with subagent support.
-
-    Same pattern as v1/v2, but now includes the Task tool.
-    When model calls Task, it spawns a subagent with isolated context.
-    """
     while True:
-        response = client.messages.create(
+        completion = client.chat.completions.create(
             model=MODEL,
-            system=SYSTEM,
             messages=messages,
             tools=ALL_TOOLS,
-            max_tokens=8000,
+            max_tokens=32 * 1024,
         )
 
-        tool_calls = []
-        for block in response.content:
-            if hasattr(block, "text"):
-                print(block.text)
-            if block.type == "tool_use":
-                tool_calls.append(block)
+        messages.append(completion.choices[0].message.model_dump())
 
-        if response.stop_reason != "tool_use":
-            messages.append({"role": "assistant", "content": response.content})
+        print(f"{Colors.GREEN}{completion.choices[0].message.content.strip()}{Colors.RESET}")
+
+        if completion.choices[0].finish_reason != "tool_calls":
             return messages
+        
+        tool_calls = completion.choices[0].message.tool_calls
+        for tool_call in tool_calls:
+            tool_name = tool_call.function.name
+            function_args = json.loads(tool_call.function.arguments)
+            if tool_name != "TodoWrite":
+                print(f"{Colors.YELLOW}$ {tool_name}: {function_args}{Colors.RESET}")
 
-        results = []
-        for tc in tool_calls:
-            # Task tool has special display handling
-            if tc.name == "Task":
-                print(f"\n> Task: {tc.input.get('description', 'subtask')}")
-            else:
-                print(f"\n> {tc.name}")
-
-            output = execute_tool(tc.name, tc.input)
-
-            # Don't print full Task output (it manages its own display)
-            if tc.name != "Task":
-                preview = output[:200] + "..." if len(output) > 200 else output
-                print(f"  {preview}")
-
-            results.append({
-                "type": "tool_result",
-                "tool_use_id": tc.id,
-                "content": output
-            })
-
-        messages.append({"role": "assistant", "content": response.content})
-        messages.append({"role": "user", "content": results})
-
-
-# =============================================================================
-# Main REPL
-# =============================================================================
+            output = execute_tool(tool_name, function_args)
+            if tool_name != "Task":
+                preview = output[:300] + "..." if len(output) > 300 else output
+                print(f"{Colors.WHITE}{preview or '(empty)'}{Colors.RESET}")
+            messages.append(
+                {"role": "tool", "content": output[:50000], "tool_call_id": tool_call.id}
+            )
 
 def main():
-    print(f"Mini Claude Code v3 (with Subagents) - {WORKDIR}")
-    print(f"Agent types: {', '.join(AGENT_TYPES.keys())}")
-    print("Type 'exit' to quit.\n")
 
-    history = []
+    console = Console()
+
+    message = Text.from_markup(f"Mini Claude Code v3 (with Subagents) - [green]{WORKDIR}[/]\nCurrent Time: [green]{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}[/]\nAgent Types: [green]{', '.join(AGENT_TYPES.keys())}[/]")
+    content = Align(message, align="center")
+
+    panel = Panel(
+        content,
+        title="[bold yellow]Control Panel[/]",
+        subtitle="[dim]Type 'exit' to quit[/]",
+        border_style="blue",
+        box=ROUNDED,
+        padding=(1, 2),
+        expand=True,
+        highlight=True,
+    )
+
+    console.print(panel)
+
+    history = [{"role": "system", "content": SYSTEM}]
 
     while True:
         try:
-            user_input = input("You: ").strip()
+            user_input = input(f"{Colors.CYAN}>> {Colors.RESET}").strip()
         except (EOFError, KeyboardInterrupt):
             break
 
