@@ -317,7 +317,7 @@ def agent_loop(messages: list) -> list:
 
         if completion.choices[0].finish_reason != "tool_calls":
             return messages
-        
+
         used_todo = False
         tool_calls = completion.choices[0].message.tool_calls
         for tool_call in tool_calls:
@@ -339,6 +339,9 @@ def agent_loop(messages: list) -> list:
             rounds_without_todo = 0
         else:
             rounds_without_todo += 1
+
+        if rounds_without_todo > 10:
+            messages[-1]["content"] = f"{NAG_REMINDER}\n\n{messages[-1]['content']}"
 
 def main():
     global rounds_without_todo
@@ -378,8 +381,6 @@ def main():
         if first_message:
             content.append({"type": "text", "text": INITIAL_REMINDER})
             first_message = False
-        elif rounds_without_todo > 10:
-            content.append({"type": "text", "text": NAG_REMINDER})
 
         content.append({"type": "text", "text": user_input})
         history.append({"role": "user", "content": content})
