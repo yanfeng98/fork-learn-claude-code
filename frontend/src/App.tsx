@@ -1,15 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Terminal, Upload, Play, Cpu, Loader2 } from 'lucide-react';
-
-// 解析后端传来的 ANSI 颜色代码，简单转为 HTML 样式
-const formatLog = (text: string) => {
-  // 简单去除颜色代码，或者你可以引入 ansi-to-html 库来实现真彩色
-  // 为了演示简单，这里只做简单的正则清洗，或者保留原始文本
-  // 如果你想漂亮，可以用 span 包裹颜色
-  // 这里做一个简单的清理演示：
-  // eslint-disable-next-line no-control-regex
-  return text.replace(/\x1b\[[0-9;]*m/g, '');
-};
+import LogMessage from './components/LogMessage';
 
 function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -90,10 +81,10 @@ function App() {
             <input 
               type="file" 
               accept=".zip"
-              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              className="mb-4 text-white absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               onChange={(e) => setFile(e.target.files?.[0] || null)}
             />
-            <Upload className="mx-auto mb-2 text-gray-400" />
+            <Upload className="mx-auto mb-4 text-gray-400" size={48} />
             <p className="text-sm text-gray-300">
               {file ? file.name : "点击或拖拽上传 ZIP"}
             </p>
@@ -128,27 +119,19 @@ function App() {
         </div>
       </header>
 
-      {/* 终端日志区域 */}
-      <div className="flex-1 overflow-y-auto bg-surface border border-border rounded-xl p-4 font-mono text-sm mb-4 shadow-inner">
-        {logs.map((log, i) => (
-          <div key={i} className={`mb-2 ${log.type === 'user' ? 'text-right' : 'text-left'}`}>
-            {log.type === 'user' ? (
-              <span className="inline-block bg-blue-600/20 text-blue-200 px-3 py-1 rounded-lg">
-                {log.content}
-              </span>
-            ) : (
-              <div className="whitespace-pre-wrap break-words text-gray-300 pl-2 border-l-2 border-gray-700">
-                 {/* 如果内容是工具调用，可以根据内容特征给不同颜色，这里简化处理 */}
-                 {log.content.includes("Wait") || log.content.includes("Error") 
-                    ? <span className="text-yellow-400">{formatLog(log.content)}</span>
-                    : formatLog(log.content)
-                 }
-              </div>
-            )}
-          </div>
-        ))}
+      {/* 2. 修改：终端日志区域 */}
+      <div className="flex-1 overflow-y-auto bg-surface border border-border rounded-xl p-4 shadow-inner custom-scrollbar">
+        <div className="flex flex-col gap-3">
+            {logs.map((log, i) => (
+            <div key={i} className={log.type === 'user' ? 'text-right' : 'text-left'}>
+                {/* 使用我们新创建的组件 */}
+                <LogMessage content={log.content} type={log.type} />
+            </div>
+            ))}
+        </div>
+        
         {isProcessing && (
-          <div className="flex items-center gap-2 text-gray-500 text-xs mt-2">
+          <div className="flex items-center gap-2 text-gray-500 text-xs mt-4 pl-2 animate-pulse">
             <Loader2 size={12} className="animate-spin" /> Agent is thinking...
           </div>
         )}
