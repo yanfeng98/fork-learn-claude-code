@@ -1,17 +1,12 @@
 import os
-import re
-import time
 import json
-import datetime
 import subprocess
-import shutil
 from pathlib import Path
 from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# 定义颜色常量，用于前端解析或后端简单处理
 class Colors:
     RESET   = "\033[0m"
     RED     = "\033[31m"
@@ -25,7 +20,7 @@ class Colors:
 class AgentSession:
     def __init__(self, workdir: str, log_callback):
         self.workdir = Path(workdir)
-        self.log_callback = log_callback # 这是一个异步函数，用于发送日志到前端
+        self.log_callback = log_callback
         self.model = os.environ.get("OPENAI_MODEL", "deepseek-v3-2-251201")
         self.client = OpenAI(
             api_key=os.environ.get("OPENAI_API_KEY"),
@@ -33,15 +28,12 @@ class AgentSession:
             timeout=1800,
         )
         self.skills = {}
-        # 初始化工具定义（精简版，复用你的逻辑）
         self.setup_tools()
 
     async def log(self, content, color=Colors.WHITE):
-        """发送日志到前端"""
         await self.log_callback(f"{color}{content}{Colors.RESET}")
 
     def setup_tools(self):
-        # 这里复用你原本的工具定义，但把 safe_path 绑定到 self.workdir
         self.tools = [
             {
                 "type": "function",
@@ -67,24 +59,19 @@ class AgentSession:
                     },
                 },
             },
-            # ... 你可以继续添加 write_file, edit_file 等
         ]
 
     def safe_path(self, p: str) -> Path:
         path = (self.workdir / p).resolve()
-        # 简单的安全检查
         if not str(path).startswith(str(self.workdir.resolve())):
              raise ValueError(f"Path escapes workspace: {p}")
         return path
 
-    # --- 工具执行函数 ---
     async def execute_tool(self, name: str, args: dict) -> str:
         output = ""
         try:
             if name == "bash":
-                # 简单实现 bash
                 cmd = args["command"]
-                # 安全拦截
                 if "rm -rf /" in cmd: return "Error: Dangerous command"
                 
                 process = subprocess.run(
@@ -96,7 +83,9 @@ class AgentSession:
             elif name == "read_file":
                 p = self.safe_path(args["path"])
                 if p.exists():
-                    output = p.read_text()[:50000]
+                    raw_content = p.read_text()[:50000]
+                    ext = p.suffix.lstrip(".") or "text"
+                    output = f"```{ext}\n{raw_content}\n```"
                 else:
                     output = "Error: File not found"
             
@@ -109,7 +98,6 @@ class AgentSession:
         return output
 
     async def step(self, messages: list):
-        """执行一步智能体逻辑"""
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -121,14 +109,12 @@ class AgentSession:
             msg = response.choices[0].message
             messages.append(msg.model_dump())
 
-            # 打印思考过程/回复
             if msg.content:
                 await self.log(msg.content, Colors.GREEN)
 
             if not msg.tool_calls:
-                return messages # 对话结束，等待用户输入
+                return messages
 
-            # 处理工具调用
             for tool_call in msg.tool_calls:
                 name = tool_call.function.name
                 args = json.loads(tool_call.function.arguments)
@@ -137,7 +123,6 @@ class AgentSession:
                 
                 tool_output = await self.execute_tool(name, args)
                 
-                # 截断展示
                 preview = tool_output[:300] + "..." if len(tool_output) > 300 else tool_output
                 await self.log(preview, Colors.WHITE)
 
@@ -147,7 +132,6 @@ class AgentSession:
                     "tool_call_id": tool_call.id
                 })
             
-            # 工具调用完后，递归调用自身继续处理（直到不需要调用工具）
             return await self.step(messages)
 
         except Exception as e:

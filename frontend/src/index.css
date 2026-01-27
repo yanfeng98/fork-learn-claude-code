@@ -19,11 +19,19 @@ body {
   border-radius: 4px;
 }
 
-.ansi-black-fg { color: #3f3f46; }
-.ansi-red-fg { color: #f87171; }
-.ansi-green-fg { color: #4ade80; }
-.ansi-yellow-fg { color: #facc15; }
-.ansi-blue-fg { color: #60a5fa; }
-.ansi-magenta-fg { color: #c084fc; }
-.ansi-cyan-fg { color: #22d3ee; }
-.ansi-white-fg { color: #f4f4f5; }
+/* --- ANSI 颜色重映射 (针对暗黑背景优化) --- */
+
+/* 关键修复：把原本的“黑色”文字强制显示为“浅灰色”，否则在黑底上看不见 */
+.ansi-black-fg { color: #a1a1aa !important; } 
+
+/* 其他颜色微调，确保高亮清晰 */
+.ansi-red-fg { color: #ef4444 !important; }
+.ansi-green-fg { color: #22c55e !important; }
+.ansi-yellow-fg { color: #eab308 !important; }
+.ansi-blue-fg { color: #3b82f6 !important; }
+.ansi-magenta-fg { color: #d946ef !important; }
+.ansi-cyan-fg { color: #06b6d4 !important; }
+.ansi-white-fg { color: #fafafa !important; }
+
+/* 背景色映射 (可选) */
+.ansi-black-bg { background-color: #27272a; }

@@ -77,6 +77,12 @@ npm install ansi-to-react react-markdown react-syntax-highlighter remark-gfm
 npm install --save-dev @types/react-syntax-highlighter
 ```
 
+### 5. 安装 Tailwind Typography 插件
+
+```bash
+npm install -D @tailwindcss/typography
+```
+
 ## 运行前端
 
 ```bash
