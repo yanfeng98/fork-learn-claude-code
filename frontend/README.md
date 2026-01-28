@@ -83,6 +83,12 @@ npm install --save-dev @types/react-syntax-highlighter
 npm install -D @tailwindcss/typography
 ```
 
+### 6. 安装 react-ace 代码编辑器
+
+```bash
+npm install @radix-ui/react-dialog @radix-ui/react-separator @radix-ui/react-tooltip ace-builds react-ace @radix-ui/react-scroll-area @mui/x-tree-view @mui/material @emotion/react @emotion/styled
+```
+
 ## 运行前端
 
 ```bash

@@ -21,45 +21,12 @@ pip install uv
 uv sync
 source .venv/bin/activate
 
-# Configure your API
-cp .env.example .env
-# Edit .env with your API key
-
 # Run any version
 python v0_bash_agent.py  # Minimal
 python v1_basic_agent.py # Core agent loop
 python v2_todo_agent.py  # + Todo planning
 python v3_subagent.py    # + Subagents
 python v4_skills_agent.py # + Skills
-```
-
-## The Core Pattern
-
-Every coding agent is just this loop:
-
-```python
-while True:
-    response = model(messages, tools)
-    if response.stop_reason != "tool_use":
-        return response.text
-    results = execute(response.tool_calls)
-    messages.append(results)
-```
-
-That's it. The model calls tools until done. Everything else is refinement.
-
-## File Structure
-
-```
-learn-claude-code/
-├── v0_bash_agent.py       # ~50 lines: 1 tool, recursive subagents
-├── v0_bash_agent_mini.py  # ~16 lines: extreme compression
-├── v1_basic_agent.py      # ~200 lines: 4 tools, core loop
-├── v2_todo_agent.py       # ~300 lines: + TodoManager
-├── v3_subagent.py         # ~450 lines: + Task tool, agent registry
-├── v4_skills_agent.py     # ~550 lines: + Skill tool, SkillLoader
-├── skills/                # Example skills (for learning)
-└── docs/                  # Detailed explanations (EN + ZH)
 ```
 
 ## Using the Agent Builder Skill
@@ -127,30 +94,3 @@ SKILL.md files provide domain expertise on-demand. Knowledge as a first-class ci
 | [Kode](https://github.com/shareAI-lab/Kode) | Full-featured open source agent CLI (production) |
 | [shareAI-skills](https://github.com/shareAI-lab/shareAI-skills) | Production-ready skills for AI agents |
 | [Agent Skills Spec](https://github.com/anthropics/agent-skills) | Official specification |
-
-### Use as Template
-
-Fork and customize for your own agent projects:
-
-```bash
-git clone https://github.com/shareAI-lab/learn-claude-code
-cd learn-claude-code
-# Start from any version level
-cp v1_basic_agent.py my_agent.py
-```
-
-## Philosophy
-
-> The model is 80%. Code is 20%.
-
-Modern agents like Kode and Claude Code work not because of clever engineering, but because the model is trained to be an agent. Our job is to give it tools and stay out of the way.
-
-## License
-
-MIT
-
----
-
-**Model as Agent. That's the whole secret.**
-
-[@baicai003](https://x.com/baicai003)

@@ -1,6 +1,6 @@
 import os
 import json
-import subprocess
+import asyncio
 from pathlib import Path
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -18,9 +18,10 @@ class Colors:
     WHITE   = "\033[37m"
 
 class AgentSession:
-    def __init__(self, workdir: str, log_callback):
+    def __init__(self, workdir: str, log_callback, fs_update_callback):
         self.workdir = Path(workdir)
         self.log_callback = log_callback
+        self.fs_update_callback = fs_update_callback
         self.model = os.environ.get("OPENAI_MODEL", "deepseek-v3-2-251201")
         self.client = OpenAI(
             api_key=os.environ.get("OPENAI_API_KEY"),
@@ -59,6 +60,37 @@ class AgentSession:
                     },
                 },
             },
+            {
+                "type": "function",
+                "function": {
+                    "name": "write_file",
+                    "description": "Write to file.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string"},
+                            "content": {"type": "string"}
+                        },
+                        "required": ["path", "content"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "edit_file",
+                    "description": "Replace text in file.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string"},
+                            "old_text": {"type": "string"},
+                            "new_text": {"type": "string"},
+                        },
+                        "required": ["path", "old_text", "new_text"],
+                    },
+                },
+            },
         ]
 
     def safe_path(self, p: str) -> Path:
@@ -72,14 +104,18 @@ class AgentSession:
         try:
             if name == "bash":
                 cmd = args["command"]
-                if "rm -rf /" in cmd: return "Error: Dangerous command"
-                
-                process = subprocess.run(
-                    cmd, shell=True, cwd=self.workdir,
-                    capture_output=True, text=True, timeout=60
+                if "rm -rf /" in cmd or "sudo" in cmd or "shutdown" in cmd:
+                    return "Error: Dangerous command"
+
+                process = await asyncio.create_subprocess_shell(
+                    cmd, cwd=self.workdir,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
                 )
-                output = (process.stdout + process.stderr).strip() or "(no output)"
-            
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=60)
+                output = (stdout.decode().strip() + stderr.decode().strip()) or "(no output)"
+                await self.fs_update_callback()
+
             elif name == "read_file":
                 p = self.safe_path(args["path"])
                 if p.exists():
@@ -88,13 +124,31 @@ class AgentSession:
                     output = f"```{ext}\n{raw_content}\n```"
                 else:
                     output = "Error: File not found"
-            
+
+            elif name == "write_file":
+                fp = self.safe_path(args["path"])
+                fp.parent.mkdir(parents=True, exist_ok=True)
+                fp.write_text(args["content"])
+                output = f"Wrote {len(args['content'])} bytes to {args['path']}"
+                await self.fs_update_callback()
+
+            elif name == "edit_file":
+                fp = self.safe_path(args["path"])
+                text = fp.read_text()
+                if args["old_text"] not in text:
+                    return f"Error: Text not found in {args['path']}"
+                fp.write_text(text.replace(args["old_text"], args["new_text"], 1))
+                output = f"Edited {args['path']}"
+                await self.fs_update_callback()
+
             else:
                 output = f"Tool {name} not implemented in demo."
 
+        except asyncio.TimeoutError:
+            output = f"Error: Command timed out after 60 seconds."
         except Exception as e:
             output = f"Error executing {name}: {str(e)}"
-        
+
         return output
 
     async def step(self, messages: list):
@@ -105,7 +159,7 @@ class AgentSession:
                 tools=self.tools,
                 max_tokens=4096
             )
-            
+
             msg = response.choices[0].message
             messages.append(msg.model_dump())
 
@@ -118,11 +172,11 @@ class AgentSession:
             for tool_call in msg.tool_calls:
                 name = tool_call.function.name
                 args = json.loads(tool_call.function.arguments)
-                
+
                 await self.log(f"$ {name}: {args}", Colors.YELLOW)
-                
+
                 tool_output = await self.execute_tool(name, args)
-                
+
                 preview = tool_output[:300] + "..." if len(tool_output) > 300 else tool_output
                 await self.log(preview, Colors.WHITE)
 
@@ -131,7 +185,7 @@ class AgentSession:
                     "content": tool_output,
                     "tool_call_id": tool_call.id
                 })
-            
+
             return await self.step(messages)
 
         except Exception as e:

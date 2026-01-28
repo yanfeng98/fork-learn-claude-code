@@ -2,6 +2,7 @@ export default {
   content: [
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
+    "./node_modules/tree-view-react/dist/**/*.js",
   ],
   theme: {
     extend: {
@@ -9,8 +10,9 @@ export default {
         background: "#09090b",
         surface: "#18181b",
         border: "#27272a",
+        'accent-dark': '#0f172a',
+        'accent-light': '#1e293b',
       },
-      // 自定义 Typography 样式（可选，让代码块背景更贴合）
       typography: (theme) => ({
         DEFAULT: {
           css: {
@@ -43,6 +45,6 @@ export default {
     },
   },
   plugins: [
-    require('@tailwindcss/typography'), // 添加这一行
+    require('@tailwindcss/typography'),
   ],
 }
