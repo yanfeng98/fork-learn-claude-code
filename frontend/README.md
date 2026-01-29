@@ -41,7 +41,7 @@ export default {
 
 修改 `frontend/src/index.css`，清空内容并填入：
 
-```js
+```css
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

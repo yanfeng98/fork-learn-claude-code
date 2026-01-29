@@ -189,7 +189,7 @@ class AgentSession:
             messages.append(msg)
 
             if msg.content:
-                await self.log(msg.content, Colors.GREEN)
+                await self.log(msg.content.strip(), Colors.GREEN)
 
             if not msg.tool_calls:
                 return messages

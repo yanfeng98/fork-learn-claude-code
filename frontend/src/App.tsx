@@ -9,13 +9,11 @@ function App() {
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
 
-  // 聊天日志
   const [logs, setLogs] = useState<{ type: 'log' | 'user'; content: string }[]>([]);
   const [input, setInput] = useState("");
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // 文件系统状态
   const [fileTree, setFileTree] = useState<any[]>([]);
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string>('');
@@ -24,11 +22,9 @@ function App() {
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   const handleBackToUpload = () => {
-    // 断开 ws
     socket?.close();
     setSocket(null);
 
-    // 清空会话/状态
     setSessionId(null);
     setFile(null);
     setLogs([]);
@@ -41,8 +37,6 @@ function App() {
     setIsFileLoading(false);
   };
 
-
-  // 自动滚动日志
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
@@ -55,7 +49,7 @@ function App() {
     formData.append("file", file);
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/upload", {
+      const res = await fetch("/api/upload", {
         method: "POST",
         body: formData,
       });
@@ -72,16 +66,15 @@ function App() {
 
   const handleDownload = () => {
     if (!sessionId) return;
-    // 直接触发浏览器下载
-    window.location.href = `http://127.0.0.1:8000/download/${sessionId}`;
+    window.location.href = `/api/download/${sessionId}`;
   };
 
   const connectWebSocket = (sid: string) => {
-    const ws = new WebSocket(`ws://127.0.0.1:8000/ws/${sid}`);
+    const wsProtocol = location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(`${wsProtocol}//${location.host}/ws/${sid}`);
 
     ws.onopen = () => {
         console.log("WebSocket connected.");
-        // 连接成功后立即请求文件树
         ws.send(JSON.stringify({ type: "get_file_tree" }));
     };
 
@@ -100,10 +93,8 @@ function App() {
         setFileContent(data.content || '');
         setIsFileLoading(false);
       } else if (data.type === 'fs_update') {
-        // 收到文件系统更新通知，重新拉取文件树
         if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: "get_file_tree" }));
-            // 如果当前正在查看的文件被修改，稍后刷新内容
             if (selectedFilePath) {
                 setTimeout(() => {
                   ws.send(JSON.stringify({ type: "read_file", path: selectedFilePath }));
@@ -115,7 +106,6 @@ function App() {
 
     ws.onclose = () => {
         console.log("WebSocket disconnected.");
-        // 可以在这里处理断线重连逻辑
     };
 
     setSocket(ws);
