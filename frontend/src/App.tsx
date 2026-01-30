@@ -128,12 +128,10 @@ function App() {
 
   const handleFileSave = useCallback((path: string, content: string) => {
     if (socket && path) {
-      // 乐观更新：先不设 loading，或者设一个轻微的 loading
       socket.send(JSON.stringify({ type: "save_file", path, content }));
     }
   }, [socket]);
 
-  // --- 1. 上传界面 ---
   if (!sessionId) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-background text-white">
