@@ -168,10 +168,8 @@ function App() {
     );
   }
 
-  // --- 2. 主工作区界面 (IDE Layout) ---
   return (
     <div className="flex flex-col h-screen bg-background text-gray-300 overflow-hidden font-sans">
-      {/* 顶部导航栏 */}
       <header className="h-12 bg-surface border-b border-border flex items-center px-4 justify-between shrink-0">
         <button
           onClick={handleBackToUpload}
@@ -199,10 +197,8 @@ function App() {
         </div>
       </header>
 
-      {/* 主体区域：左右分栏 + 底部终端 */}
       <div className="flex-1 flex overflow-hidden">
 
-        {/* 左侧：文件资源管理器 (固定宽度 250px) */}
         <div className="w-64 bg-surface border-r border-border flex flex-col shrink-0">
           <FileExplorer
             files={fileTree}
@@ -211,10 +207,8 @@ function App() {
           />
         </div>
 
-        {/* 右侧：编辑器(左) + 智能体(右) */}
         <div className="flex-1 flex min-w-0 overflow-hidden">
 
-          {/* 左侧：代码编辑器区域 */}
           <div className="flex-1 min-w-0 flex flex-col">
             <div className="flex-1 min-h-0 relative flex flex-col">
               {!selectedFilePath ? (
@@ -233,15 +227,11 @@ function App() {
             </div>
           </div>
 
-          {/* 右侧：智能体终端面板（固定宽度，可按需调） */}
           <div className="w-[900px] border-l border-border bg-[#0f0f11] flex flex-col min-w-[320px] max-w-[900px]">
-            {/* 标题条 */}
             <div className="h-9 bg-surface border-b border-border flex items-center px-4 gap-4 text-xs font-medium text-gray-400 select-none shrink-0">
               <span className="text-blue-400 border-b-2 border-blue-400 h-full flex items-center px-1">TERMINAL / AGENT</span>
-              <span className="hover:text-gray-200 cursor-pointer h-full flex items-center px-1">OUTPUT</span>
             </div>
 
-            {/* 内容区 */}
             <div className="flex-1 p-4 overflow-y-auto custom-scrollbar font-mono text-sm min-h-0">
               <div className="flex flex-col gap-2">
                 {logs.map((log, i) => (
@@ -257,7 +247,6 @@ function App() {
               </div>
             </div>
 
-            {/* 输入框 */}
             <div className="p-3 bg-surface border-t border-border shrink-0">
               <div className="relative">
                 <Terminal size={16} className="absolute left-3 top-3 text-gray-500" />

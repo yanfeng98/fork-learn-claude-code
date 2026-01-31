@@ -3,9 +3,8 @@ import { File, Folder } from 'lucide-react';
 import { SimpleTreeView } from '@mui/x-tree-view/SimpleTreeView';
 import { TreeItem } from '@mui/x-tree-view/TreeItem';
 import { ScrollArea } from '@radix-ui/react-scroll-area';
-import { alpha, styled } from '@mui/material/styles';
+import { styled } from '@mui/material/styles';
 
-// 为了保持接口完全一致，保留 ITreeItem 类型定义（虽然内部不再使用 tree-view-react）
 export interface ITreeItem {
   id: string;
   label: string;
@@ -20,18 +19,17 @@ interface FileExplorerProps {
   selectedFilePath: string | null;
 }
 
-// 自定义 TreeItem 样式，匹配原有的 Tailwind 设计
 const StyledTreeItem = styled(TreeItem)(({ theme }) => ({
   '& .MuiTreeItem-content': {
     padding: '6px 8px',
     margin: '2px 0',
     borderRadius: '4px',
-    color: '#d1d5db', // text-gray-300
+    color: '#d1d5db',
     '&:hover': {
-      backgroundColor: 'rgba(55, 65, 81, 0.5)', // hover:bg-gray-700/50
+      backgroundColor: 'rgba(55, 65, 81, 0.5)',
     },
     '&.Mui-selected': {
-      backgroundColor: 'rgba(37, 99, 235, 0.3)', // bg-blue-600/30
+      backgroundColor: 'rgba(37, 99, 235, 0.3)',
       color: '#ffffff',
       '&:hover': {
         backgroundColor: 'rgba(37, 99, 235, 0.4)',
@@ -48,7 +46,6 @@ const StyledTreeItem = styled(TreeItem)(({ theme }) => ({
 }));
 
 const FileExplorer: React.FC<FileExplorerProps> = ({ files, onFileSelect, selectedFilePath }) => {
-  // 转换文件列表为 MUI TreeView 兼容的格式（保持与原代码逻辑一致）
   const transformToTreeItems = (items: any[]): any[] => {
     return items.map(item => ({
       id: item.path,
@@ -63,7 +60,6 @@ const FileExplorer: React.FC<FileExplorerProps> = ({ files, onFileSelect, select
 
   const treeItems = transformToTreeItems(files);
 
-  // 递归渲染树节点
   const renderTree = (items: any[]) => {
     return items.map((item) => {
       const isSelected = item.id === selectedFilePath;
@@ -105,13 +101,13 @@ const FileExplorer: React.FC<FileExplorerProps> = ({ files, onFileSelect, select
       <ScrollArea className="flex-1 overflow-y-auto">
         {treeItems.length > 0 ? (
           <SimpleTreeView
-            defaultExpandedItems={treeItems.map(item => item.id)} // 相当于 defaultExpandAll
-            selectedItems={selectedFilePath ?? undefined} // ✅ 修复：改为 string | undefined
+            defaultExpandedItems={treeItems.map(item => item.id)}
+            selectedItems={selectedFilePath ?? undefined}
             onItemClick={(event, itemId) => onFileSelect(itemId)}
             sx={{
               padding: '4px',
               '& .MuiTreeItem-root': {
-                paddingLeft: '8px', // 基础缩进
+                paddingLeft: '8px',
               },
             }}
           >
