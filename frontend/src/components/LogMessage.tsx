@@ -1,9 +1,51 @@
-import React from 'react';
+import React, { useState } from 'react';
 import Ansi from 'ansi-to-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+
+interface CopyButtonProps {
+  text: string;
+  className?: string;
+}
+
+const CopyButton: React.FC<CopyButtonProps> = ({ text, className = '' }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy text: ', err);
+    }
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      className={`p-1.5 rounded-md transition-all duration-200 
+        ${copied 
+          ? 'text-green-400 bg-green-400/10' 
+          : 'text-gray-400 hover:text-white hover:bg-white/10'
+        } ${className}`}
+      title="Copy to clipboard"
+    >
+      {copied ? (
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+      ) : (
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+        </svg>
+      )}
+    </button>
+  );
+};
 
 interface LogMessageProps {
   content: string;
@@ -11,10 +53,16 @@ interface LogMessageProps {
 }
 
 const LogMessage: React.FC<LogMessageProps> = ({ content, type }) => {
-  // 1. 用户消息
+  // eslint-disable-next-line no-control-regex
+  const cleanContent = content.replace(/\x1b\[[0-9;]*m/g, '');
+
   if (type === 'user') {
     return (
-      <div className="flex justify-end">
+      <div className="flex justify-end group items-center gap-2">
+        <CopyButton 
+          text={content} 
+          className="opacity-0 group-hover:opacity-100 transition-opacity" 
+        />
         <span className="inline-block bg-blue-600 text-white px-4 py-2 rounded-xl text-sm shadow-md font-sans">
           {content}
         </span>
@@ -22,34 +70,34 @@ const LogMessage: React.FC<LogMessageProps> = ({ content, type }) => {
     );
   }
 
-  // 2. 预处理
-  // 移除 ANSI 码用于检测 Markdown 特征，但在渲染 Bash 时我们要保留原 ANSI 码
-  // eslint-disable-next-line no-control-regex
-  const cleanContent = content.replace(/\x1b\[[0-9;]*m/g, '');
-
-  // 3. 智能判断逻辑 (修复换行问题的核心)
-  // 只有当内容看起来真的像“自然语言对话”或“包含Markdown代码块”时，才启用 Markdown 渲染。
-  // bash 工具输出（如 ls, cat）通常不包含 # 标题，也不包含 ``` 代码块（除非是 cat 一个代码文件，但那时我们希望它是原样的）
   const isMarkdown = 
     content.includes('```') || 
     (content.length > 50 && (content.includes('# ') || content.includes('**'))) ||
-    content.startsWith('You are') || // System prompt echo
-    content.startsWith('Agent');     // Agent status
+    content.startsWith('You are') ||
+    content.startsWith('Agent');
 
-  // --- 分支 A: 智能体对话 (Markdown 渲染) ---
   if (isMarkdown) {
     return (
-      <div className="prose prose-invert prose-sm max-w-none break-words text-gray-300 leading-7">
+      <div className="group relative prose prose-invert prose-sm max-w-none break-words text-gray-300 leading-7">
+        
+        <div className="absolute top-0 right-0 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+          <CopyButton text={cleanContent} className="bg-[#1e1e1e] shadow-sm border border-white/10" />
+        </div>
+
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           components={{
-            // 代码块高亮
             code({ node, inline, className, children, ...props }: any) {
               const match = /language-(\w+)/.exec(className || '');
+              const codeText = String(children).replace(/\n$/, '');
+
               return !inline && match ? (
                 <div className="rounded-lg overflow-hidden my-4 border border-white/10 shadow-lg bg-[#1e1e1e]">
                   <div className="flex items-center justify-between px-4 py-1.5 bg-[#2d2d2d] border-b border-white/5">
                     <span className="text-xs text-gray-400 font-mono">{match[1]}</span>
+                    <div className="flex items-center">
+                      <CopyButton text={codeText} />
+                    </div>
                   </div>
                   <SyntaxHighlighter
                     {...props}
@@ -58,7 +106,7 @@ const LogMessage: React.FC<LogMessageProps> = ({ content, type }) => {
                     PreTag="div"
                     customStyle={{ margin: 0, padding: '1rem', background: 'transparent', fontSize: '0.85rem' }}
                   >
-                    {String(children).replace(/\n$/, '')}
+                    {codeText}
                   </SyntaxHighlighter>
                 </div>
               ) : (
@@ -67,7 +115,6 @@ const LogMessage: React.FC<LogMessageProps> = ({ content, type }) => {
                 </code>
               );
             },
-            // 链接、列表、表格样式保持不变...
             a: ({ node, ...props }) => <a {...props} className="text-blue-400 hover:underline" />,
             ul: ({ node, ...props }) => <ul {...props} className="list-disc pl-6 my-2" />,
             li: ({ node, ...props }) => <li {...props} className="pl-1" />,
@@ -80,19 +127,15 @@ const LogMessage: React.FC<LogMessageProps> = ({ content, type }) => {
     );
   }
 
-  // --- 分支 B: 工具输出/终端日志 (LS, ReadFile, Bash) ---
-  // 这里是修复 LS 乱码和 ReadFile 不高亮的关键
   return (
     <div className="group relative">
-      {/* 装饰条：标示这是终端输出 */}
       <div className="absolute left-0 top-0 bottom-0 w-1 bg-gray-700/50 rounded-full group-hover:bg-blue-500/50 transition-colors"></div>
       
+      <div className="absolute top-1 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+        <CopyButton text={cleanContent} className="bg-[#1e1e1e]/80 backdrop-blur-sm border border-white/10" />
+      </div>
+
       <div className="pl-4 py-1 overflow-x-auto">
-        {/* 关键 CSS 类：
-           1. whitespace-pre-wrap: 保留 ls 的换行符，遇到长行自动换行
-           2. font-mono: 等宽字体，对齐表格
-           3. text-gray-300: 默认颜色设为亮灰，防止 read_file 读出来的纯文本变成黑色
-        */}
         <pre className="whitespace-pre-wrap font-mono text-sm leading-relaxed text-gray-300 break-all">
           <Ansi useClasses>{content}</Ansi>
         </pre>
