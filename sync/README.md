@@ -1,10 +1,4 @@
-[English](./README.md) | [中文](./README-zh.md) | [日本語](./README-ja.md)  
 # Learn Claude Code -- A nano Claude Code-like agent, built from 0 to 1
-<img width="260" src="https://github.com/user-attachments/assets/fe8b852b-97da-4061-a467-9694906b5edf" /><br>
-
-Scan with Wechat to fellow us,  
-or fellow on X: [shareAI-Lab](https://x.com/baicai003)  
-
 
 ```
                     THE AGENT PATTERN
@@ -88,7 +82,7 @@ Every session layers one mechanism on top of this loop -- without changing the l
 This repository is a 0->1 learning project for building a nano Claude Code-like agent.
 It intentionally simplifies or omits several production mechanisms:
 
-- Full event/hook buses (for example PreToolUse, SessionStart/End, ConfigChange).  
+- Full event/hook buses (for example PreToolUse, SessionStart/End, ConfigChange).
   s12 includes only a minimal append-only lifecycle event stream for teaching.
 - Rule-based permission governance and trust workflows
 - Session lifecycle controls (resume/fork) and advanced worktree lifecycle controls
@@ -102,11 +96,11 @@ Treat the team JSONL mailbox protocol in this repo as a teaching implementation,
 git clone https://github.com/shareAI-lab/learn-claude-code
 cd learn-claude-code
 pip install -r requirements.txt
-cp .env.example .env   # Edit .env with your ANTHROPIC_API_KEY
+cp .env.example .env
 
-python agents/s01_agent_loop.py       # Start here
-python agents/s12_worktree_task_isolation.py  # Full progression endpoint
-python agents/s_full.py               # Capstone: all mechanisms combined
+python agents/s01_agent_loop.py
+python agents/s12_worktree_task_isolation.py
+python agents/s_full.py
 ```
 
 ### Web Platform
@@ -157,16 +151,13 @@ s08  Background Tasks        [6]     s10  Team Protocols          [12]
 learn-claude-code/
 |
 |-- agents/                        # Python reference implementations (s01-s12 + s_full capstone)
-|-- docs/{en,zh,ja}/               # Mental-model-first documentation (3 languages)
+|-- docs/{en,zh}/                  # Mental-model-first documentation (2 languages)
 |-- web/                           # Interactive learning platform (Next.js)
 |-- skills/                        # Skill files for s05
 +-- .github/workflows/ci.yml      # CI: typecheck + build
 ```
 
 ## Documentation
-
-Mental-model-first: problem, solution, ASCII diagram, minimal code.
-Available in [English](./docs/en/) | [中文](./docs/zh/) | [日本語](./docs/ja/).
 
 | Session | Topic | Motto |
 |---------|-------|-------|
@@ -182,26 +173,6 @@ Available in [English](./docs/en/) | [中文](./docs/zh/) | [日本語](./docs/j
 | [s10](./docs/en/s10-team-protocols.md) | Team Protocols | *Teammates need shared communication rules* |
 | [s11](./docs/en/s11-autonomous-agents.md) | Autonomous Agents | *Teammates scan the board and claim tasks themselves* |
 | [s12](./docs/en/s12-worktree-task-isolation.md) | Worktree + Task Isolation | *Each works in its own directory, no interference* |
-
-## What's Next -- from understanding to shipping
-
-After the 12 sessions you understand how an agent works inside out. Two ways to put that knowledge to work:
-
-### Kode Agent CLI -- Open-Source Coding Agent CLI
-
-> `npm i -g @shareai-lab/kode`
-
-Skill & LSP support, Windows-ready, pluggable with GLM / MiniMax / DeepSeek and other open models. Install and go.
-
-GitHub: **[shareAI-lab/Kode-cli](https://github.com/shareAI-lab/Kode-cli)**
-
-### Kode Agent SDK -- Embed Agent Capabilities in Your App
-
-The official Claude Code Agent SDK communicates with a full CLI process under the hood -- each concurrent user means a separate terminal process. Kode SDK is a standalone library with no per-user process overhead, embeddable in backends, browser extensions, embedded devices, or any runtime.
-
-GitHub: **[shareAI-lab/Kode-agent-sdk](https://github.com/shareAI-lab/Kode-agent-sdk)**
-
----
 
 ## Sister Repo: from *on-demand sessions* to *always-on assistant*
 
@@ -226,11 +197,3 @@ learn-claude-code                   claw0
  loop, tools, planning,              heartbeat, cron, IM channels,
  teams, worktree isolation)          memory, soul personality)
 ```
-
-## License
-
-MIT
-
----
-
-**The model is the agent. Our job is to give it tools and stay out of the way.**
