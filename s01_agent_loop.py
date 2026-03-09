@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 import os
 import sys
 import json
@@ -26,7 +25,7 @@ client = OpenAI(
 )
 
 MODEL = os.environ.get("OPENAI_MODEL", "deepseek-v3-2-251201")
-TOOL = [
+TOOLS = [
     {
         "type": "function",
         "function": {
@@ -49,7 +48,7 @@ TOOL = [
     }
 ]
 
-SYSTEM = f"""You are a CLI agent at {os.getcwd()}. Solve problems using bash commands.
+SYSTEM = f"""You are a coding agent at {os.getcwd()}. Solve problems using bash commands.
 
 Rules:
 - Prefer tools over prose. Act first, explain briefly after.
@@ -65,8 +64,19 @@ When to use subagent:
 
 The subagent runs in isolation and returns only its final summary."""
 
+def run_bash(command: str) -> str:
+    dangerous: list[str] = ["rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"]
+    if any(d in command for d in dangerous):
+        return "Error: Dangerous command blocked"
+    try:
+        r = subprocess.run(command, shell=True, cwd=os.getcwd(),
+                           capture_output=True, text=True, timeout=120)
+        out: str = (r.stdout + r.stderr).strip()
+        return out[:50000] if out else "(no output)"
+    except subprocess.TimeoutExpired:
+        return "Error: Timeout (120s)"
 
-def chat(prompt, history=None):
+def agent_loop(prompt: str, history: list[dict[str, str]] = None):
     if history is None:
         history = [{"role": "system", "content": SYSTEM}]
 
@@ -76,7 +86,7 @@ def chat(prompt, history=None):
         completion = client.chat.completions.create(
             model=MODEL,
             messages=history,
-            tools=TOOL,
+            tools=TOOLS,
             max_tokens=32 * 1024,
         )
 
@@ -94,18 +104,7 @@ def chat(prompt, history=None):
             function_args = json.loads(tool_call.function.arguments)
             cmd = function_args.get("command")
             print(f"{Colors.YELLOW}$ {cmd}{Colors.RESET}")
-            try:
-                out = subprocess.run(
-                    cmd,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=300,
-                    cwd=os.getcwd()
-                )
-                output = out.stdout + out.stderr
-            except subprocess.TimeoutExpired:
-                output = "(timeout after 300s)"
+            output: str = run_bash(cmd)
 
             print(f"{Colors.WHITE}$ {output or '(empty)'}{Colors.RESET}")
             history.append(
@@ -115,14 +114,14 @@ def chat(prompt, history=None):
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
-        print(chat(sys.argv[1]))
+        print(agent_loop(sys.argv[1]))
     else:
-        history = []
+        history: list[dict[str, str]] = []
         while True:
             try:
-                query = input(f"{Colors.CYAN}>> {Colors.RESET}")
+                query: str = input(f"{Colors.CYAN}>> {Colors.RESET}")
             except (EOFError, KeyboardInterrupt):
                 break
-            if query in ("q", "exit", ""):
+            if query.strip().lower() in ("q", "exit", ""):
                 break
-            print(f"{Colors.MAGENTA}$ {chat(query, history)}{Colors.RESET}")
+            print(f"{Colors.MAGENTA}$ {agent_loop(query, history)}{Colors.RESET}")
