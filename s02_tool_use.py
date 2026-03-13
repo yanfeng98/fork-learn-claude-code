@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import os
 import json
 import datetime
@@ -158,13 +157,13 @@ def run_bash(command: str) -> str:
             cwd=WORKDIR,
             capture_output=True,
             text=True,
-            timeout=60
+            timeout=120
         )
         output = (result.stdout + result.stderr).strip()
         return output[:50000] if output else "(no output)"
 
     except subprocess.TimeoutExpired:
-        return "Error: Command timed out (60s)"
+        return "Error: Command timed out (120s)"
     except Exception as e:
         return f"Error: {e}"
 
@@ -175,8 +174,7 @@ def run_read(path: str, limit: int = None) -> str:
         lines = text.splitlines()
 
         if limit and limit < len(lines):
-            lines = lines[:limit]
-            lines.append(f"... ({len(text.splitlines()) - limit} more lines)")
+            lines = lines[:limit] + [f"... ({len(lines) - limit} more lines)"]
 
         return "\n".join(lines)[:50000]
 
@@ -203,8 +201,7 @@ def run_edit(path: str, old_text: str, new_text: str) -> str:
         if old_text not in content:
             return f"Error: Text not found in {path}"
 
-        new_content = content.replace(old_text, new_text, 1)
-        fp.write_text(new_content)
+        fp.write_text(content.replace(old_text, new_text, 1))
         return f"Edited {path}"
 
     except Exception as e:
