@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import os
 import json
 import datetime
@@ -35,60 +34,41 @@ client = OpenAI(
 )
 
 class TodoManager:
-
     def __init__(self):
         self.items = []
 
     def update(self, items: list) -> str:
+        if len(items) > 20:
+            raise ValueError("Max 20 todos allowed")
         validated = []
         in_progress_count = 0
-
         for i, item in enumerate(items):
-            content = str(item.get("content", "")).strip()
+            text = str(item.get("text", "")).strip()
             status = str(item.get("status", "pending")).lower()
-            active_form = str(item.get("activeForm", "")).strip()
-
-            if not content:
-                raise ValueError(f"Item {i}: content required")
+            item_id = str(item.get("id", str(i + 1)))
+            if not text:
+                raise ValueError(f"Item {item_id}: text required")
             if status not in ("pending", "in_progress", "completed"):
-                raise ValueError(f"Item {i}: invalid status '{status}'")
-            if not active_form:
-                raise ValueError(f"Item {i}: activeForm required")
-
+                raise ValueError(f"Item {item_id}: invalid status '{status}'")
             if status == "in_progress":
                 in_progress_count += 1
-
-            validated.append({
-                "content": content,
-                "status": status,
-                "activeForm": active_form
-            })
-
-        if len(validated) > 20:
-            raise ValueError("Max 20 todos allowed")
+            validated.append({"id": item_id, "text": text, "status": status})
         if in_progress_count > 1:
             raise ValueError("Only one task can be in_progress at a time")
-
         self.items = validated
         return self.render()
 
     def render(self) -> str:
         if not self.items:
             return "No todos."
-
         lines = []
         for item in self.items:
-            if item["status"] == "completed":
-                lines.append(f"[x] {item['content']}")
-            elif item["status"] == "in_progress":
-                lines.append(f"[>] {item['content']} <- {item['activeForm']}")
-            else:
-                lines.append(f"[ ] {item['content']}")
-
-        completed = sum(1 for t in self.items if t["status"] == "completed")
-        lines.append(f"\n({completed}/{len(self.items)} completed)")
-
+            marker = {"pending": "[ ]", "in_progress": "[>]", "completed": "[x]"}[item["status"]]
+            lines.append(f"{marker} #{item['id']}: {item['text']}")
+        done = sum(1 for t in self.items if t["status"] == "completed")
+        lines.append(f"\n({done}/{len(self.items)} completed)")
         return "\n".join(lines)
+
 
 TODO = TodoManager()
 
@@ -102,9 +82,6 @@ Rules:
 - Prefer tools over prose. Act, don't just explain.
 - After finishing, summarize what changed."""
 
-INITIAL_REMINDER = "<reminder>Use TodoWrite for multi-step tasks.</reminder>"
-NAG_REMINDER = "<reminder>10+ turns without todo update. Please update todos.</reminder>"
-
 TOOLS = [
     {
         "type": "function",
@@ -115,11 +92,14 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "command": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "The shell command to execute"
                     }
                 },
                 "required": ["command"],
+                "additionalProperties": False,
             },
+            "strict": True,
         },
     },
     {
@@ -131,14 +111,18 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "path": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Relative path to the file"
                     },
                     "limit": {
-                        "type": "integer"
-                    }
+                        "type": "integer",
+                        "description": "Max lines to read"
+                    },
                 },
                 "required": ["path"],
+                "additionalProperties": False,
             },
+            "strict": True,
         },
     },
     {
@@ -150,14 +134,18 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "path": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Relative path for the file"
                     },
                     "content": {
-                        "type": "string"
-                    }
+                        "type": "string",
+                        "description": "Content to write"
+                    },
                 },
                 "required": ["path", "content"],
+                "additionalProperties": False,
             },
+            "strict": True,
         },
     },
     {
@@ -169,55 +157,63 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "path": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Relative path to the file"
                     },
                     "old_text": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Exact text to find"
                     },
                     "new_text": {
-                        "type": "string"
-                    }
+                        "type": "string",
+                        "description": "Replacement text"
+                    },
                 },
                 "required": ["path", "old_text", "new_text"],
+                "additionalProperties": False,
             },
+            "strict": True,
         },
     },
     {
         "type": "function",
         "function": {
-            "name": "TodoWrite",
-            "description": "Update the task list. Use to plan and track progress.",
+            "name": "todo",
+            "description": "Update task list. Track progress on multi-step tasks.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "items": {
                         "type": "array",
-                        "description": "Complete list of tasks (replaces existing)",
+                        "description": "List of tasks to update or track",
                         "items": {
                             "type": "object",
                             "properties": {
-                                "content": {
+                                "id": {
                                     "type": "string",
-                                    "description": "Task description"
+                                    "description": "Unique identifier for the task"
+                                },
+                                "text": {
+                                    "type": "string",
+                                    "description": "Description of the task"
                                 },
                                 "status": {
                                     "type": "string",
                                     "enum": ["pending", "in_progress", "completed"],
-                                    "description": "Task status"
-                                },
-                                "activeForm": {
-                                    "type": "string",
-                                    "description": "Present tense action, e.g. 'Reading files'"
+                                    "description": "Current status of the task"
                                 }
                             },
-                            "required": ["content", "status", "activeForm"],
+                            "required": ["id", "text", "status"],
+                            "additionalProperties": False
                         }
                     }
                 },
                 "required": ["items"],
+                "additionalProperties": False,
             },
+            "strict": True,
         },
-    }
+    },
 ]
 
 def safe_path(p: str) -> Path:
@@ -227,29 +223,24 @@ def safe_path(p: str) -> Path:
     return path
 
 
-def run_bash(cmd: str) -> str:
-    dangerous = ["rm -rf /", "sudo", "shutdown", "reboot"]
-    if any(d in cmd for d in dangerous):
+def run_bash(command: str) -> str:
+    dangerous = ["rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"]
+    if any(d in command for d in dangerous):
         return "Error: Dangerous command blocked"
     try:
-        result = subprocess.run(
-            cmd, shell=True, cwd=WORKDIR,
-            capture_output=True, text=True, timeout=60
-        )
-        output = (result.stdout + result.stderr).strip()
-        return output[:50000] if output else "(no output)"
+        r = subprocess.run(command, shell=True, cwd=WORKDIR,
+                           capture_output=True, text=True, timeout=120)
+        out = (r.stdout + r.stderr).strip()
+        return out[:50000] if out else "(no output)"
     except subprocess.TimeoutExpired:
-        return "Error: Timeout"
-    except Exception as e:
-        return f"Error: {e}"
+        return "Error: Timeout (120s)"
 
 
 def run_read(path: str, limit: int = None) -> str:
     try:
-        text = safe_path(path).read_text()
-        lines = text.splitlines()
+        lines = safe_path(path).read_text().splitlines()
         if limit and limit < len(lines):
-            lines = lines[:limit] + [f"... ({len(text.splitlines()) - limit} more)"]
+            lines = lines[:limit] + [f"... ({len(lines) - limit} more)"]
         return "\n".join(lines)[:50000]
     except Exception as e:
         return f"Error: {e}"
@@ -260,7 +251,7 @@ def run_write(path: str, content: str) -> str:
         fp = safe_path(path)
         fp.parent.mkdir(parents=True, exist_ok=True)
         fp.write_text(content)
-        return f"Wrote {len(content)} bytes to {path}"
+        return f"Wrote {len(content)} bytes"
     except Exception as e:
         return f"Error: {e}"
 
@@ -284,24 +275,16 @@ def run_todo(items: list) -> str:
         return f"Error: {e}"
 
 
-def execute_tool(name: str, args: dict) -> str:
-    if name == "bash":
-        return run_bash(args["command"])
-    if name == "read_file":
-        return run_read(args["path"], args.get("limit"))
-    if name == "write_file":
-        return run_write(args["path"], args["content"])
-    if name == "edit_file":
-        return run_edit(args["path"], args["old_text"], args["new_text"])
-    if name == "TodoWrite":
-        return run_todo(args["items"])
-    return f"Unknown tool: {name}"
-
-rounds_without_todo = 0
-
+TOOL_HANDLERS = {
+    "bash":       lambda **kw: run_bash(kw["command"]),
+    "read_file":  lambda **kw: run_read(kw["path"], kw.get("limit")),
+    "write_file": lambda **kw: run_write(kw["path"], kw["content"]),
+    "edit_file":  lambda **kw: run_edit(kw["path"], kw["old_text"], kw["new_text"]),
+    "todo":       lambda **kw: TODO.update(kw["items"]),
+}
 
 def agent_loop(messages: list) -> list:
-    global rounds_without_todo
+    rounds_since_todo = 0
 
     while True:
         completion = client.chat.completions.create(
@@ -323,25 +306,26 @@ def agent_loop(messages: list) -> list:
         for tool_call in tool_calls:
             tool_name = tool_call.function.name
             function_args = json.loads(tool_call.function.arguments)
-            if tool_name == "TodoWrite":
+            if tool_name == "todo":
                 used_todo = True
             else:
                 print(f"{Colors.YELLOW}$ {tool_name}: {function_args}{Colors.RESET}")
 
-            output = execute_tool(tool_name, function_args)
+            handler = TOOL_HANDLERS.get(tool_name)
+            try:
+                output = handler(**function_args) if handler else f"Unknown tool: {tool_name}"
+            except Exception as e:
+                output = f"Error: {e}"
             preview = output[:300] + "..." if len(output) > 300 else output
             print(f"{Colors.WHITE}{preview or '(empty)'}{Colors.RESET}")
             messages.append(
                 {"role": "tool", "content": output[:50000], "tool_call_id": tool_call.id}
             )
 
-        if used_todo:
-            rounds_without_todo = 0
-        else:
-            rounds_without_todo += 1
+        rounds_since_todo = 0 if used_todo else rounds_since_todo + 1
 
-        if rounds_without_todo > 10:
-            messages[-1]["content"] = f"{NAG_REMINDER}\n\n{messages[-1]['content']}"
+        if rounds_since_todo >= 3:
+            messages[-1]["content"] = f"{messages[-1]['content']}\n\n<reminder>Update your todos.</reminder>"
 
 def main():
     global rounds_without_todo
@@ -365,7 +349,6 @@ def main():
     console.print(panel)
 
     history = [{"role": "system", "content": SYSTEM}]
-    first_message = True
 
     while True:
         try:
@@ -376,14 +359,7 @@ def main():
         if not user_input or user_input.lower() in ("exit", "quit", "q"):
             break
 
-        content = []
-
-        if first_message:
-            content.append({"type": "text", "text": INITIAL_REMINDER})
-            first_message = False
-
-        content.append({"type": "text", "text": user_input})
-        history.append({"role": "user", "content": content})
+        history.append({"role": "user", "content": user_input})
 
         try:
             agent_loop(history)
